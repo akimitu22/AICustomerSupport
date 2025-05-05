@@ -5,6 +5,7 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
   external_node_modules = ["axios", "form-data"]
+  included_files = ["**/service-account.json"]
 
 [functions.stt]
   timeout = 26
