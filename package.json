@@ -1,0 +1,25 @@
+{
+  "name": "ai-customer-support",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node https-server.js"
+  },
+  "dependencies": {
+    "@google-cloud/text-to-speech": "^6.0.1",
+    "axios": "^1.9.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "ffmpeg-static": "^5.2.0",
+    "form-data": "^4.0.2",
+    "jsonwebtoken": "^9.0.2",
+    "kuroshiro": "^1.2.0",
+    "kuroshiro-analyzer-kuromoji": "^1.1.0",
+    "multer": "^1.4.5-lts.2",
+    "node-whisper": "^2024.11.13",
+    "openai": "^4.96.2",
+    "string-similarity": "^4.0.4",
+    "uuid": "^11.1.0"
+  }
+}
