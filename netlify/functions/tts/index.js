@@ -1,13 +1,9 @@
 // netlify/functions/tts/index.js
-// 2025-05-06 版  ─ GOOGLE_APPLICATION_CREDENTIALS が
-//   ① Base64 エンコード JSON
-//   ② そのままの JSON
-//   ③ ファイルパス              の 3 形態すべてに対応。
-// ---------------------------------------------
+// 安定版：Base64・JSON・ファイルパスすべて対応、遅延初期化対応済み
 
 const textToSpeech = require('@google-cloud/text-to-speech');
 
-/* ───── 1. 読み替え辞書 ───── */
+/* ───── 発音補正辞書 ───── */
 const pronunciationDictionary = {
   '副園長': 'ふくえんちょう',
   '入園':   'にゅうえん',
@@ -18,6 +14,7 @@ const pronunciationDictionary = {
   '他園':   'たえん',
   '園':     'えん'
 };
+
 function fixPronunciation(text = '') {
   let out = text;
   for (const [word, kana] of Object.entries(pronunciationDictionary)) {
@@ -26,78 +23,82 @@ function fixPronunciation(text = '') {
   return out;
 }
 
-/* ───── 2. Google TTS クライアント初期化 ───── */
+/* ───── Google TTS クライアント遅延初期化 ───── */
+let ttsClient = null;
+
 function initTTSClient() {
-  const candKeys = [
+  const envVars = [
     'GOOGLE_APPLICATION_CREDENTIALS_JSON',
     'GOOGLE_APPLICATION_CREDENTIALS',
     'GOOGLE_CREDENTIALS',
     'GCP_CREDENTIALS'
   ];
 
-  for (const key of candKeys) {
+  for (const key of envVars) {
     const raw = process.env[key];
     if (!raw) continue;
 
-    // 2-1) そのまま JSON 文字列
+    // JSON 文字列
     if (raw.trim().startsWith('{')) {
       return new textToSpeech.TextToSpeechClient({ credentials: JSON.parse(raw) });
     }
 
-    // 2-2) Base64 → JSON
+    // Base64 → JSON
     try {
       const decoded = Buffer.from(raw, 'base64').toString('utf8');
       if (decoded.trim().startsWith('{')) {
         return new textToSpeech.TextToSpeechClient({ credentials: JSON.parse(decoded) });
       }
     } catch (_) {
-      /* fall through */
+      /* ignore */
     }
 
-    // 2-3) ファイルパス
+    // ファイルパスとして利用
     return new textToSpeech.TextToSpeechClient({ keyFilename: raw });
   }
 
   throw new Error(
-    'Google Cloud 認証情報が見つかりません。' +
-    'Netlify の環境変数に JSON または Base64 文字列を設定してください。'
+    'Google認証情報が不正または未設定です。Netlifyの環境変数にJSONまたはBase64を指定してください。'
   );
 }
 
-let ttsClient;   // ランタイムで 1 回だけ初期化
-try   { ttsClient = initTTSClient(); }
-catch (e) { console.error('TTS Client 初期化失敗:', e); }
+function getTTSClient() {
+  if (!ttsClient) {
+    ttsClient = initTTSClient();
+  }
+  return ttsClient;
+}
 
-/* ───── 3. Lambda ハンドラ ───── */
+/* ───── Lambda ハンドラ ───── */
 exports.handler = async (event) => {
-  const allowHeaders = [
-    'Content-Type',
-    'Authorization'
-  ].join(', ');
-
   const headers = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': allowHeaders
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
   };
 
-  /* ── CORS プリフライト ── */
+  // OPTIONS
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
   }
+
   if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
+    return {
+      statusCode: 405,
+      headers,
+      body: JSON.stringify({ error: 'Method Not Allowed' })
+    };
   }
 
-  /* ── リクエスト解析 ── */
   let body;
-  try { body = JSON.parse(event.body || '{}'); }
-  catch (e) {
+  try {
+    body = JSON.parse(event.body || '{}');
+  } catch (e) {
     return {
       statusCode: 400,
       headers,
-      body: JSON.stringify({ error: 'JSON パースエラー', details: e.message })
+      body: JSON.stringify({ error: 'JSONパースエラー', details: e.message })
     };
   }
 
@@ -110,13 +111,11 @@ exports.handler = async (event) => {
     };
   }
 
-  /* ── 発音補正 & SSML ── */
-  const fixed   = fixPronunciation(text);
-  const ssml    = `<speak>${fixed}</speak>`;
+  const fixedText = fixPronunciation(text);
+  const ssml = `<speak>${fixedText}</speak>`;
 
-  /* ── Google TTS 呼び出し ── */
   try {
-    const [resp] = await ttsClient.synthesizeSpeech({
+    const [resp] = await getTTSClient().synthesizeSpeech({
       input: { ssml },
       voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
       audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
@@ -126,17 +125,19 @@ exports.handler = async (event) => {
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({ audioUrl: `data:audio/mpeg;base64,${base64}` })
+      body: JSON.stringify({
+        audioUrl: `data:audio/mpeg;base64,${base64}`
+      })
     };
   } catch (e) {
-    console.error('TTS API エラー:', e);
+    console.error('TTS 呼び出し失敗:', e);
     return {
       statusCode: 502,
       headers,
       body: JSON.stringify({
         error: 'Google TTS 呼び出し失敗',
         details: e.message,
-        fallbackText: fixed
+        fallbackText: fixedText
       })
     };
   }
