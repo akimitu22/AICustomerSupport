@@ -77,7 +77,10 @@ async function handleRecordingStop() {
       )
     );
     
+    console.log("音声データサイズ: " + Math.round(base64Data.length / 1024) + "KB");
+    
     // JSONで送信
+    console.log("STTリクエスト送信開始");
     const stt = await fetch('/.netlify/functions/stt', {
       method: 'POST',
       headers: {
@@ -85,13 +88,19 @@ async function handleRecordingStop() {
       },
       body: JSON.stringify({
         audio: base64Data,
-        format: 'webm',
+        format: 'audio/webm',
         duration: (Date.now() - recordingStartTime) / 1000
       })
-    }).then(r => r.json());
+    }).then(r => {
+      console.log("STTレスポンス受信: ステータス", r.status);
+      return r.json();
+    });
+    
+    console.log("STT結果:", stt);
     
     // 以下は既存の処理と同様
     if (!stt.text?.trim()) {
+      console.error("STT結果が空です");
       statusEl.textContent = '❌ 発話認識失敗';
       vadActive = true;
       return;
@@ -110,40 +119,109 @@ async function handleRecordingStop() {
 async function handleAI(msg){
   try{
     statusEl.textContent='💭 回答生成中…';
+    
+    console.log("AIリクエスト送信開始:", msg);
     // APIパスを変更:
-    const ai=await fetch('/.netlify/functions/ai',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({message:msg,sessionId:currentSessionId})
-    }).then(r=>r.json());
+    const ai = await fetch('/.netlify/functions/ai', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: msg, sessionId: currentSessionId})
+    }).then(r => {
+      console.log("AIレスポンス受信: ステータス", r.status);
+      return r.json();
+    });
 
-    currentSessionId=ai.sessionId;
-    localStorage.setItem('kindergarten_session_id',currentSessionId);
-    conversationStage=ai.stage;
+    console.log("AI結果:", ai);
+    
+    currentSessionId = ai.sessionId;
+    localStorage.setItem('kindergarten_session_id', currentSessionId);
+    conversationStage = ai.stage;
 
-    setTimeout(()=>{replyEl.textContent=`サポートからの回答: ${ai.reply}`;},500);
+    setTimeout(() => {replyEl.textContent = `サポートからの回答: ${ai.reply}`;}, 500);
 
-    statusEl.textContent='🔊 回答生成中…';
+    statusEl.textContent = '🔊 回答生成中…';
+    
+    console.log("TTSリクエスト送信開始:", ai.reply.substring(0, 50) + "...");
     // APIパスを変更:
-    const tts=await fetch('/.netlify/functions/tts',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text:ai.reply})
-    }).then(r=>r.json());
+    const tts = await fetch('/.netlify/functions/tts', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: ai.reply})
+    }).then(r => {
+      console.log("TTSレスポンス受信: ステータス", r.status);
+      return r.json();
+    });
 
-    if(tts.audioUrl) await playAudio(tts.audioUrl);
-  }catch(e){
-    console.error(e); statusEl.textContent='❌ 回答生成失敗';
-  }finally{
-    vadActive=true; statusEl.textContent='🎧 次の発話を検知します';
+    console.log("TTS結果:", tts);
+    
+    if (tts.audioUrl) {
+      console.log("音声URL取得成功、再生開始:", tts.audioUrl.substring(0, 50) + "...");
+      try {
+        await playAudio(tts.audioUrl);
+        console.log("音声再生完了");
+      } catch (playError) {
+        console.error("音声再生エラー:", playError);
+      }
+    } else if (tts.error) {
+      console.error("TTS エラー:", tts.error, tts.errorDetail || "");
+    } else {
+      console.error("音声URLが見つかりません:", tts);
+    }
+  } catch(e) {
+    console.error('AI/TTS処理エラー:', e);
+    statusEl.textContent = '❌ 回答生成失敗';
+  } finally {
+    vadActive = true;
+    statusEl.textContent = '🎧 次の発話を検知します';
   }
 }
 
-function playAudio(url){
-  return new Promise(res=>{
-    if(isPlayingAudio&&currentAudio) currentAudio.pause();
-    currentAudio=new Audio(url); isPlayingAudio=true; currentAudio.play();
-    currentAudio.onended=()=>{isPlayingAudio=false; res();};
+function playAudio(url) {
+  console.log("playAudio関数が呼び出されました");
+  return new Promise((resolve, reject) => {
+    try {
+      if (isPlayingAudio && currentAudio) {
+        console.log("既存の音声を停止");
+        currentAudio.pause();
+      }
+      
+      currentAudio = new Audio(url);
+      console.log("Audioオブジェクト作成完了");
+      
+      currentAudio.onerror = (e) => {
+        console.error("音声読み込みエラー:", e);
+        reject(new Error("音声の読み込みに失敗しました"));
+      };
+      
+      currentAudio.oncanplaythrough = () => {
+        console.log("音声再生準備完了");
+        isPlayingAudio = true;
+        
+        // 音声再生の直前にブラウザの状態をチェック
+        console.log("ブラウザ音声状態:", 
+                   "ミュート=", currentAudio.muted,
+                   "ボリューム=", currentAudio.volume);
+        
+        const playPromise = currentAudio.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => console.log("音声再生開始"))
+            .catch(err => {
+              console.error("音声再生Promise失敗:", err);
+              reject(err);
+            });
+        }
+      };
+      
+      currentAudio.onended = () => {
+        console.log("音声再生終了");
+        isPlayingAudio = false;
+        resolve();
+      };
+    } catch (e) {
+      console.error("playAudio関数内エラー:", e);
+      reject(e);
+    }
   });
 }
 
