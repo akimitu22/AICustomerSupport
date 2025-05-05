@@ -1,12 +1,13 @@
 // netlify/functions/stt/index.js
 const axios = require('axios');
+const FormData = require('form-data');
 
 exports.handler = async function(event, context) {
-  // CORSヘッダー
+  // 改善されたCORSヘッダー
   const headers = {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Allow-Methods": "POST, OPTIONS"
   };
   
@@ -15,28 +16,67 @@ exports.handler = async function(event, context) {
     return { statusCode: 200, headers, body: "" };
   }
   
+  // POSTメソッド以外は拒否
+  if (event.httpMethod !== 'POST') {
+    return { 
+      statusCode: 405, 
+      headers, 
+      body: JSON.stringify({ error: 'Method Not Allowed' }) 
+    };
+  }
+  
   // デバッグログ
   console.log("STT関数開始 - Whisper API実装");
-  console.log("Content-Type:", event.headers['content-type'] || event.headers['Content-Type']);
   console.log("isBase64Encoded:", event.isBase64Encoded);
   
   try {
-    // マルチパートフォームデータの処理
-    if (event.headers['content-type']?.includes('multipart/form-data')) {
-      console.log("マルチパートフォームデータを検出しました");
-      
-      // FormDataはサーバーレス環境では処理が複雑なため、テスト応答を返す
-      console.log("現在の実装では音声データを処理できません。クライアント側をBase64+JSON方式に変更してください");
-      
+    // Content-Type判定を改善
+    const contentType = event.headers['content-type'] || '';
+    if (!contentType.includes('application/json')) {
+      console.log("非JSONリクエストを検出:", contentType);
       return {
-        statusCode: 200,
+        statusCode: 400,
         headers,
         body: JSON.stringify({
-          text: "音声認識テスト中です（マルチパート形式検出）。クライアント側をBase64+JSON方式に変更してください。",
-          success: true
+          error: "JSONリクエストが必要です",
+          success: false
         })
       };
     }
+    
+    // JSONパース
+    let requestBody;
+    try {
+      requestBody = JSON.parse(event.body || '{}');
+    } catch (parseError) {
+      console.error("JSONパースエラー:", parseError);
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "JSONパースエラー",
+          details: parseError.message,
+          success: false
+        })
+      };
+    }
+    
+    // 音声データチェック
+    if (!requestBody.audio) {
+      console.error("音声データなし");
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "音声データがありません",
+          success: false
+        })
+      };
+    }
+    
+    // サイズログ（音声データ自体は出力しない）
+    console.log("音声データ長:", requestBody.audio.length);
+    console.log("フォーマット:", requestBody.format);
     
     // APIキーチェック
     if (!process.env.OPENAI_API_KEY) {
@@ -51,56 +91,111 @@ exports.handler = async function(event, context) {
       };
     }
     
-    // JSONリクエストの処理（将来的なBase64+JSON方式用）
-    if (event.headers['content-type']?.includes('application/json')) {
-      console.log("JSONデータを検出しました");
-      
-      // JSON解析テスト
-      try {
-        const requestBody = JSON.parse(event.body || '{}');
-        console.log("JSONパース成功。audioフィールド:", requestBody.audio ? "あり" : "なし");
-        
-        // 現段階ではテスト応答を返す
-        return {
-          statusCode: 200,
-          headers,
-          body: JSON.stringify({
-            text: "JSON形式を正常に受信しました。この段階ではまだWhisper APIを呼び出していません。",
-            success: true
-          })
-        };
-      } catch (parseError) {
-        console.error("JSONパースエラー:", parseError);
-        return {
-          statusCode: 400,
-          headers,
-          body: JSON.stringify({
-            error: "JSONパースエラー",
-            details: parseError.message,
-            success: false
-          })
-        };
-      }
+    // Base64データをバイナリに変換
+    const audioBuffer = Buffer.from(requestBody.audio, 'base64');
+    
+    // サイズチェック（Netlify Functionsは~10MB制限）
+    const sizeInMB = audioBuffer.length / (1024 * 1024);
+    if (sizeInMB > 9.5) {
+      console.error(`音声データが大きすぎます: ${sizeInMB.toFixed(2)}MB`);
+      return {
+        statusCode: 413,
+        headers,
+        body: JSON.stringify({
+          error: "音声データが大きすぎます (10MB制限)",
+          success: false
+        })
+      };
     }
     
-    // 不明なContent-Type
-    console.log("不明なContent-Type:", event.headers['content-type']);
+    // FormDataの作成
+    const formData = new FormData();
+    formData.append('file', audioBuffer, {
+      filename: 'audio.webm',
+      contentType: requestBody.format || 'audio/webm'
+    });
+    formData.append('model', 'whisper-1');
+    formData.append('language', 'ja');
+    
+    // FormDataヘッダーの準備
+    const fdHeaders = formData.getHeaders();
+    // Content-Lengthを正確に設定（Node 18環境での安定性向上）
+    fdHeaders['Content-Length'] = await new Promise(resolve => 
+      formData.getLength((err, length) => resolve(length))
+    );
+    
+    // Whisper APIへリクエスト（タイムアウト設定とサイズ制限を追加）
+    console.log("Whisper APIにリクエスト送信");
+    const response = await axios.post(
+      'https://api.openai.com/v1/audio/transcriptions',
+      formData,
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          ...fdHeaders
+        },
+        maxBodyLength: 25 * 1024 * 1024, // 送信サイズ制限
+        maxContentLength: 25 * 1024 * 1024, // 受信サイズ制限
+        timeout: 25000 // 25秒タイムアウト
+      }
+    );
+    
+    console.log("Whisper API応答ステータス:", response.status);
+    console.log("応答データタイプ:", typeof response.data);
+    
     return {
-      statusCode: 400,
+      statusCode: 200,
       headers,
       body: JSON.stringify({
-        error: "不明なリクエスト形式",
-        details: "Content-Type: " + (event.headers['content-type'] || "不明"),
-        success: false
+        text: response.data.text,
+        success: true
       })
     };
   } catch (error) {
     console.error("STTエラー:", error);
+    
+    // エラーの完全なスタックトレースをログ出力
+    if (error.stack) {
+      console.error(error.stack);
+    }
+    
+    // APIからのエラーレスポンスがあれば詳細を出力
+    if (error.response?.data) {
+      console.error("API詳細エラー:", JSON.stringify(error.response.data));
+    }
+    
+    // Axiosタイムアウトの特別処理
+    if (axios.isAxiosError(error) && error.code === 'ECONNABORTED') {
+      return {
+        statusCode: 504,
+        headers,
+        body: JSON.stringify({ 
+          error: "音声認識処理がタイムアウトしました",
+          details: error.message,
+          success: false
+        })
+      };
+    }
+    
+    // OpenAI APIからのエラーステータスをそのまま返す
+    if (error.response?.status) {
+      return {
+        statusCode: error.response.status,
+        headers,
+        body: JSON.stringify({ 
+          error: "Whisper APIエラー",
+          details: error.response.data?.error?.message || error.message,
+          success: false
+        })
+      };
+    }
+    
+    // その他の一般エラー
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({ 
-        error: "サーバー内部エラー",
+        error: "音声認識処理エラー",
         details: error.message,
         success: false
       })
