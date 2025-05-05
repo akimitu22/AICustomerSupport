@@ -23,42 +23,51 @@ function fixPronunciation(text) {
   return fixed;
 }
 
-// サービスアカウント初期化
-function initServiceAccount() {
-  try {
-    // 環境変数から認証情報を直接取得
-    return require('./service-account.json');
-  } catch (error) {
-    console.error("サービスアカウント読み込みエラー:", error);
-    throw new Error("サービスアカウント設定エラー: " + error.message);
+// 元コードからの流用: 認証情報処理
+function loadGoogleCredentials() {
+  const env = process.env.GOOGLE_APPLICATION_CREDENTIALS || '';
+  if (!env) return null;
+
+  // 1) そのまま JSON
+  if (env.trim().startsWith('{')) {
+    console.log("JSON形式の認証情報を使用");
+    return JSON.parse(env);
   }
+
+  // 2) Base64-encoded JSON
+  try {
+    console.log("Base64デコードを試行");
+    const decoded = Buffer.from(env, 'base64').toString('utf8');
+    if (decoded.trim().startsWith('{')) {
+      console.log("Base64デコード成功、JSON解析");
+      return JSON.parse(decoded);
+    }
+  } catch (e) {
+    console.log("Base64デコード失敗", e.message);
+  }
+
+  // 3) ファイルパスの場合
+  console.log("ファイルパスと見なされる可能性があります:", env.substring(0, 20) + "...");
+  return null;
 }
 
-// TTSクライアント初期化
 function getClient() {
-  // 環境変数を一時的に退避
-  const origValue = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  
   try {
-    // サービスアカウント情報を取得
-    const credentials = initServiceAccount();
+    // 環境変数を一時退避
+    const originalValue = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    
+    // 認証情報の取得
+    const credentials = loadGoogleCredentials();
     
     // クライアント初期化
-    const client = new textToSpeech.TextToSpeechClient({ credentials });
+    const client = credentials
+      ? new textToSpeech.TextToSpeechClient({ credentials })
+      : new textToSpeech.TextToSpeechClient();
     
-    // 環境変数を復元
-    if (origValue) {
-      process.env.GOOGLE_APPLICATION_CREDENTIALS = origValue;
-    }
-    
+    console.log("TTSクライアント初期化成功");
     return client;
   } catch (error) {
-    // 環境変数を復元
-    if (origValue) {
-      process.env.GOOGLE_APPLICATION_CREDENTIALS = origValue;
-    }
-    
+    console.error("TTSクライアント初期化エラー:", error.message);
     throw error;
   }
 }
@@ -77,12 +86,15 @@ exports.handler = async function(event, context) {
     return { statusCode: 200, headers, body: "" };
   }
   
+  console.log("TTS関数が呼び出されました");
+  
   try {
     // リクエストのパース
     let requestBody;
     try {
       requestBody = JSON.parse(event.body || '{}');
     } catch (parseError) {
+      console.error("JSONパースエラー:", parseError.message);
       return {
         statusCode: 400,
         headers,
@@ -99,7 +111,8 @@ exports.handler = async function(event, context) {
         statusCode: 400,
         headers,
         body: JSON.stringify({ 
-          error: "テキストが空です"
+          error: "テキストが空です",
+          details: "音声合成するテキストを入力してください"
         })
       };
     }
@@ -115,11 +128,13 @@ exports.handler = async function(event, context) {
       const client = getClient();
 
       // Google TTSにリクエスト
+      console.log("TTS APIリクエスト送信");
       const [response] = await client.synthesizeSpeech({
         input: { ssml: ssmlText },
         voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
         audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
       });
+      console.log("TTS API応答受信成功");
 
       // Base64エンコード
       const audioContent = Buffer.from(response.audioContent).toString('base64');
@@ -131,7 +146,9 @@ exports.handler = async function(event, context) {
         body: JSON.stringify({ audioUrl })
       };
     } catch (ttsError) {
-      // テキストのみを返す
+      console.error('TTS API呼び出しエラー:', ttsError.message);
+      
+      // フォールバック：テキストのみを返す
       return {
         statusCode: 200,
         headers,
@@ -143,6 +160,7 @@ exports.handler = async function(event, context) {
       };
     }
   } catch (e) {
+    console.error('TTS一般エラー:', e.message);
     return {
       statusCode: 500,
       headers,
