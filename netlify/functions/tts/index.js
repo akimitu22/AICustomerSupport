@@ -23,30 +23,23 @@ function fixPronunciation(text) {
   return fixed;
 }
 
-// ハードコードされた認証情報（JSON形式のみ、直接APIに渡す）
-const credentials = {
-  // 以下にサービスアカウントキーの内容をコピーペースト
-  "type": "service_account",
-  "project_id": "aicustomersupport-458610",
-  // 各フィールドを適切に設定
-};
-
-// TTSクライアント初期化 - 環境変数に依存しない
+// TTSクライアント初期化 - 環境変数から認証情報を取得
 function getClient() {
   try {
-    console.log("TTSクライアント初期化 - 直接認証情報を使用");
+    console.log("TTSクライアント初期化 - 環境変数から認証情報を使用");
     
-    // 環境変数をクリア
-    const origValue = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-    delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
-    
-    // 直接認証情報を使用してクライアント初期化
-    const client = new textToSpeech.TextToSpeechClient({ credentials });
-    
-    // 環境変数を復元
-    if (origValue) {
-      process.env.GOOGLE_APPLICATION_CREDENTIALS = origValue;
+    if (!process.env.GOOGLE_CREDENTIALS_JSON) {
+      throw new Error('GOOGLE_CREDENTIALS_JSON is not set');
     }
+    
+    let credentials;
+    try {
+      credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+    } catch (parseError) {
+      throw new Error(`Failed to parse GOOGLE_CREDENTIALS_JSON: ${parseError.message}`);
+    }
+    
+    const client = new textToSpeech.TextToSpeechClient({ credentials });
     
     console.log("TTSクライアント初期化成功");
     return client;

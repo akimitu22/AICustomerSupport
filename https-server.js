@@ -1,7 +1,4 @@
-﻿// https-server.js ― 音声対話 API サーバ（GOOGLE_APPLICATION_CREDENTIALS 対応版）
-// 2025-05-06
-
-import express from 'express';
+﻿import express from 'express';
 import multer from 'multer';
 import axios from 'axios';
 import fs from 'fs';
@@ -100,7 +97,7 @@ function systemPrompt() {
 ※電話番号は絶対に読み上げないでください。
 ※お問い合わせには「ホームページのお問い合わせフォームからどうぞ」と案内してください。
 ※「電話でのお問い合わせ」という言葉や電話番号は絶対に使わないでください。
-不明点は「園へお問い合わせください」と案内してください。また、絶対に「入園」を「入院」と誤変換して理解しないでください。お問い合わせに「入院」は絶対にありえません。それは100％「入園」の意味です。`;
+不明点は「園へお問い合わせください」と案内してください。また、絶対に「入園」を「入院」と誤変換して理解しないでください。お問い合わせに「入園」は絶対にありえません。それは100％「入園」の意味です。`;
 }
 
 app.post('/ai', async (req, res) => {
@@ -155,29 +152,41 @@ ${qaContext}
 
 function loadGoogleCredentials() {
   const env = process.env.GOOGLE_APPLICATION_CREDENTIALS || '';
-  if (!env) return null;
+  if (!env) {
+    throw new Error('GOOGLE_APPLICATION_CREDENTIALS is not set');
+  }
 
-  // 1) そのまま JSON
+  // 1) JSON 文字列
   if (env.trim().startsWith('{')) {
-    return JSON.parse(env);
+    try {
+      return JSON.parse(env);
+    } catch (parseError) {
+      throw new Error(`Failed to parse GOOGLE_APPLICATION_CREDENTIALS as JSON: ${parseError.message}`);
+    }
   }
 
   // 2) Base64-encoded JSON
   try {
     const decoded = Buffer.from(env, 'base64').toString('utf8');
-    if (decoded.trim().startsWith('{')) return JSON.parse(decoded);
-  } catch (_) {
-    /* ignore */
+    if (decoded.trim().startsWith('{')) {
+      return JSON.parse(decoded);
+    }
+  } catch (decodeError) {
+    console.error('Failed to decode GOOGLE_APPLICATION_CREDENTIALS as Base64:', decodeError.message);
   }
 
-  // 3) 従来の「ファイルパス」
-  return null;
+  throw new Error('GOOGLE_APPLICATION_CREDENTIALS is neither a valid JSON nor a Base64-encoded JSON');
 }
 
-const googleCreds = loadGoogleCredentials();
-const gTTS = googleCreds
-  ? new textToSpeech.TextToSpeechClient({ credentials: googleCreds })
-  : new textToSpeech.TextToSpeechClient();
+let googleCreds;
+try {
+  googleCreds = loadGoogleCredentials();
+} catch (error) {
+  console.error('Error loading Google credentials:', error.message);
+  throw error;
+}
+
+const gTTS = new textToSpeech.TextToSpeechClient({ credentials: googleCreds });
 
 function convertMarkdownToSSML(text) {
   return text
@@ -221,7 +230,5 @@ app.post('/tts', async (req, res) => {
   }
 });
 
-/* ───── サーバ起動 ───── */
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀  http://localhost:${PORT}`));
+// ポート3000のリスナーを削除し、Expressアプリをエクスポート
+module.exports = app;
