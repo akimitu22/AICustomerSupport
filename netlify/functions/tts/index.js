@@ -23,88 +23,91 @@ function fixPronunciation(text) {
   return fixed;
 }
 
-// Base64文字列かどうかを厳密に判定する関数
-function isBase64(str) {
-  // Base64は4の倍数の長さで、特定の文字のみを含む
-  if (str.length % 4 !== 0) return false;
-  // 正規表現パターン（Base64文字セット + 適切なパディング）
-  return /^[A-Za-z0-9+/]+={0,2}$/.test(str);
-}
-
-// Google Cloud認証情報の設定 - 環境変数から直接取得
+// Google Cloud認証情報を環境変数から取得する
 function getCredentials() {
-  // まず新しい環境変数名をチェック
+  console.log("認証情報を取得中...");
+  
+  // 環境変数からJSONを取得
   if (process.env.GOOGLE_CREDENTIALS_JSON) {
     console.log("GOOGLE_CREDENTIALS_JSON環境変数を使用");
     
-    // 内容を解析
     try {
       const content = process.env.GOOGLE_CREDENTIALS_JSON;
       
-      // Base64エンコードされているか確認
-      if (isBase64(content)) {
+      // Base64かどうかをチェック
+      // Base64の特徴: 基本的に英数字と+/=だけで構成される
+      const isBase64 = /^[A-Za-z0-9+/=]+$/.test(content);
+      
+      if (isBase64) {
+        console.log("Base64形式として処理");
         try {
-          const decoded = Buffer.from(content, 'base64').toString('utf8');
-          return JSON.parse(decoded);
+          // Base64をデコード
+          const decodedContent = Buffer.from(content, 'base64').toString('utf8');
+          
+          // JSONとして解析
+          return JSON.parse(decodedContent);
         } catch (e) {
-          console.error("Base64デコードまたはJSON解析エラー");
-          throw new Error("認証情報のBase64デコードまたはJSON解析に失敗: " + e.message);
+          console.error("Base64デコードまたはJSON解析エラー:", e.message);
+          throw new Error("Base64デコードまたはJSON解析に失敗しました");
         }
       } else {
-        // プレーンJSONとして解析
+        // 通常のJSONとして解析
+        console.log("通常のJSON形式として処理");
         return JSON.parse(content);
       }
     } catch (e) {
-      console.error("認証情報JSON解析エラー");
+      console.error("認証情報の解析エラー:", e.message);
       throw new Error("認証情報のJSON解析に失敗: " + e.message);
     }
   }
   
-  // 古い環境変数名も一応チェック
+  // 他の環境変数をチェック
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    console.log("GOOGLE_APPLICATION_CREDENTIALS環境変数を検出 - 警告: この変数名は非推奨");
-    
+    console.log("GOOGLE_APPLICATION_CREDENTIALS環境変数を検出");
     const content = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     
-    // JSONっぽい文字列かチェック
-    if (content.trim().startsWith('{') && content.trim().endsWith('}')) {
+    // JSONらしき形式かチェック
+    if (content.startsWith('{') && content.includes('"type"')) {
       try {
+        // JSONとして解析
         return JSON.parse(content);
       } catch (e) {
-        console.error("JSON解析エラー");
-        throw new Error("GOOGLE_APPLICATION_CREDENTIALSの内容をJSONとして解析できません");
+        console.error("JSON解析エラー:", e.message);
       }
-    } else {
-      // ファイルパスと判断
-      throw new Error("GOOGLE_APPLICATION_CREDENTIALSがファイルパスのようです。Netlify環境では直接JSONを指定してください");
     }
+    
+    // ファイルパスと判断
+    throw new Error("ファイルパスではなくJSON文字列が必要です");
   }
   
-  // 認証情報が見つからない
-  throw new Error("Google Cloud認証情報が見つかりません。GOOGLE_CREDENTIALS_JSON環境変数を設定してください");
+  // どの環境変数も見つからない
+  throw new Error("認証情報が見つかりません。GOOGLE_CREDENTIALS_JSON環境変数を設定してください");
 }
 
-// TTSクライアント初期化 - 環境変数の副作用を回避
+// TTSクライアントの初期化
 function getClient() {
   try {
+    console.log("TTSクライアント初期化開始");
+    
     // 認証情報を取得
     const credentials = getCredentials();
     
-    // 一時的に環境変数を退避して削除
-    const origValue = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    // 既存の環境変数をバックアップして削除（副作用防止）
+    const originalValue = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
     
     // クライアント初期化
     const client = new textToSpeech.TextToSpeechClient({ credentials });
     
-    // 環境変数を復元（他のライブラリへの影響を防ぐ）
-    if (origValue !== undefined) {
-      process.env.GOOGLE_APPLICATION_CREDENTIALS = origValue;
+    // 環境変数を復元
+    if (originalValue !== undefined) {
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = originalValue;
     }
     
+    console.log("TTSクライアント初期化成功");
     return client;
   } catch (error) {
-    console.error('TTS Client初期化エラー:', error.message);
+    console.error("TTSクライアント初期化エラー:", error.message);
     throw error;
   }
 }
@@ -156,17 +159,15 @@ exports.handler = async function(event, context) {
 
     // テキストを修正
     const fixed = fixPronunciation(text);
-    console.log("テキスト処理完了 (長さ:", fixed.length, "文字)");
+    console.log("テキスト処理完了:", fixed.substring(0, 30) + "...");
 
     // SSML形式に変換
     const ssmlText = `<speak>${fixed}</speak>`;
 
     try {
-      // クライアントの初期化
-      console.log("TTSクライアント初期化開始");
+      // TTSクライアント取得
       const client = getClient();
-      console.log("TTSクライアント初期化成功");
-
+      
       // Google TTSにリクエスト
       console.log("TTS APIリクエスト送信");
       const [response] = await client.synthesizeSpeech({
@@ -179,7 +180,7 @@ exports.handler = async function(event, context) {
       // Base64エンコード
       const audioContent = Buffer.from(response.audioContent).toString('base64');
       const audioUrl = `data:audio/mpeg;base64,${audioContent}`;
-      console.log("音声データエンコード完了 (サイズ:", Math.round(audioContent.length / 1024), "KB)");
+      console.log("音声データエンコード完了:", audioContent.length, "バイト");
 
       return {
         statusCode: 200,
@@ -187,20 +188,7 @@ exports.handler = async function(event, context) {
         body: JSON.stringify({ audioUrl })
       };
     } catch (ttsError) {
-      console.error('TTS API呼び出しエラー:', ttsError.message);
-      
-      if (ttsError.message.includes('Authentication')) {
-        console.error('認証エラーの可能性があります。環境変数を確認してください');
-        return {
-          statusCode: 401,
-          headers,
-          body: JSON.stringify({ 
-            text: fixed,
-            error: "Google Cloud認証エラー",
-            errorDetail: ttsError.message 
-          })
-        };
-      }
+      console.error("TTS API呼び出しエラー:", ttsError.message);
       
       // フォールバック：テキストのみを返す
       return {
@@ -214,12 +202,12 @@ exports.handler = async function(event, context) {
       };
     }
   } catch (e) {
-    console.error('TTS一般エラー:', e.message);
+    console.error("TTS処理エラー:", e.message);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({ 
-        error: 'TTS処理失敗', 
+        error: "TTS処理失敗", 
         details: e.message 
       })
     };
