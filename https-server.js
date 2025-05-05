@@ -150,33 +150,20 @@ ${qaContext}
 
 /* ───── Google TTS ───── */
 
+/* ★★★ ここだけ変更 ★★★ */
 function loadGoogleCredentials() {
-  const env = process.env.GOOGLE_APPLICATION_CREDENTIALS || '';
-  if (!env) {
-    throw new Error('GOOGLE_APPLICATION_CREDENTIALS is not set');
+  const b64 = process.env.GOOGLE_CREDENTIALS_B64 || '';
+  if (!b64.trim()) {
+    throw new Error('GOOGLE_CREDENTIALS_B64 is not set');
   }
-
-  // 1) JSON 文字列
-  if (env.trim().startsWith('{')) {
-    try {
-      return JSON.parse(env);
-    } catch (parseError) {
-      throw new Error(`Failed to parse GOOGLE_APPLICATION_CREDENTIALS as JSON: ${parseError.message}`);
-    }
-  }
-
-  // 2) Base64-encoded JSON
   try {
-    const decoded = Buffer.from(env, 'base64').toString('utf8');
-    if (decoded.trim().startsWith('{')) {
-      return JSON.parse(decoded);
-    }
-  } catch (decodeError) {
-    console.error('Failed to decode GOOGLE_APPLICATION_CREDENTIALS as Base64:', decodeError.message);
+    const json = Buffer.from(b64, 'base64').toString('utf8');
+    return JSON.parse(json);
+  } catch (err) {
+    throw new Error(`GOOGLE_CREDENTIALS_B64 is invalid: ${err.message}`);
   }
-
-  throw new Error('GOOGLE_APPLICATION_CREDENTIALS is neither a valid JSON nor a Base64-encoded JSON');
 }
+/* ★★★ 変更ここまで ★★★ */
 
 let googleCreds;
 try {
