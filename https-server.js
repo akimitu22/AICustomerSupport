@@ -1,9 +1,6 @@
-﻿// https-server.js の修正版（コンシェルジュ削除後）
+﻿// https-server.js ― 音声対話 API サーバ（GOOGLE_APPLICATION_CREDENTIALS 対応版）
+// 2025-05-06
 
-// ─────────────────────────────────────
-// https-server.js ― 音声対話 API サーバ
-// 2025-05-05 完全修正版：コンシェルジュ削除・URL直接埋め込み
-// ─────────────────────────────────────
 import express from 'express';
 import multer from 'multer';
 import axios from 'axios';
@@ -28,7 +25,7 @@ const app = express();
 const upload = multer({ dest: 'uploads/' });
 const sessionStorage = {};
 
-// コンシェルジュ関連コードの削除 - この部分は削除
+/* ───── Whisper STT ───── */
 
 app.use(express.json());
 app.use(express.static('public'));
@@ -67,7 +64,12 @@ app.post('/stt', upload.single('audio'), async (req, res) => {
     const { data } = await axios.post(
       'https://api.openai.com/v1/audio/transcriptions',
       fd,
-      { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, ...fd.getHeaders() } }
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          ...fd.getHeaders()
+        }
+      }
     );
 
     res.json({ text: data.text ?? '' });
@@ -81,6 +83,8 @@ app.post('/stt', upload.single('audio'), async (req, res) => {
   }
 });
 
+/* ───── ChatGPT ───── */
+
 function analyzeStage(msg, stage) {
   const kw = ['見学', '説明会', '願書', '入園'];
   if (stage === STAGES.INITIAL && kw.some(w => msg.includes(w))) return STAGES.INTEREST;
@@ -92,11 +96,11 @@ function analyzeStage(msg, stage) {
 
 function systemPrompt() {
   return `ホザナ幼稚園の入園コンシェルジュです。園に関する質問に250文字程度で親切・丁寧に回答してください。
-  ※見学を希望される方には「このページ上部の見学予約ボタンからお申し込みください」と案内してください。
-  ※電話番号は絶対に読み上げないでください。
-  ※お問い合わせには「ホームページのお問い合わせフォームからどうぞ」と案内してください。
-  ※「電話でのお問い合わせ」という言葉や電話番号は絶対に使わないでください。
-  不明点は「園へお問い合わせください」と案内してください。また、絶対に「入園」を「入院」と誤変換して理解しないでください。お問い合わせに「入院」は絶対にありえません。それは100％「入園」の意味です。`;
+※見学を希望される方には「このページ上部の見学予約ボタンからお申し込みください」と案内してください。
+※電話番号は絶対に読み上げないでください。
+※お問い合わせには「ホームページのお問い合わせフォームからどうぞ」と案内してください。
+※「電話でのお問い合わせ」という言葉や電話番号は絶対に使わないでください。
+不明点は「園へお問い合わせください」と案内してください。また、絶対に「入園」を「入院」と誤変換して理解しないでください。お問い合わせに「入院」は絶対にありえません。それは100％「入園」の意味です。`;
 }
 
 app.post('/ai', async (req, res) => {
@@ -136,12 +140,8 @@ ${qaContext}
       { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
     );
 
-    let reply = data.choices?.[0]?.message?.content || '申し訳ありません、回答を生成できませんでした。';
-
-    // コンシェルジュ関連コードの削除 - この条件分岐は削除
-    // if (process.env.ENABLE_CONCIERGE === 'true') {
-    //   reply = await conciergeEnhancer.enhance(reply, message, sess.stage, sid);
-    // }
+    const reply = data.choices?.[0]?.message?.content
+      || '申し訳ありません、回答を生成できませんでした。';
 
     sess.history.push({ role: 'assistant', content: reply });
     res.json({ reply, sessionId: sid, stage: sess.stage });
@@ -151,9 +151,33 @@ ${qaContext}
   }
 });
 
-const gTTS = new textToSpeech.TextToSpeechClient({
-  keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS
-});
+/* ───── Google TTS ───── */
+
+function loadGoogleCredentials() {
+  const env = process.env.GOOGLE_APPLICATION_CREDENTIALS || '';
+  if (!env) return null;
+
+  // 1) そのまま JSON
+  if (env.trim().startsWith('{')) {
+    return JSON.parse(env);
+  }
+
+  // 2) Base64-encoded JSON
+  try {
+    const decoded = Buffer.from(env, 'base64').toString('utf8');
+    if (decoded.trim().startsWith('{')) return JSON.parse(decoded);
+  } catch (_) {
+    /* ignore */
+  }
+
+  // 3) 従来の「ファイルパス」
+  return null;
+}
+
+const googleCreds = loadGoogleCredentials();
+const gTTS = googleCreds
+  ? new textToSpeech.TextToSpeechClient({ credentials: googleCreds })
+  : new textToSpeech.TextToSpeechClient();
 
 function convertMarkdownToSSML(text) {
   return text
@@ -196,6 +220,8 @@ app.post('/tts', async (req, res) => {
     res.status(500).json({ error: 'TTS失敗' });
   }
 });
+
+/* ───── サーバ起動 ───── */
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀  http://localhost:${PORT}`));
