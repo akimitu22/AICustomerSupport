@@ -23,62 +23,54 @@ function fixPronunciation(text) {
   return fixed;
 }
 
-// Google Cloud認証情報をJSON文字列から設定
+// Google Cloud認証情報の設定
 const getClient = () => {
   try {
+    // 環境変数に設定されたJSONを直接使用
     if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+      console.log("GOOGLE_APPLICATION_CREDENTIALS_JSONから認証情報を取得");
       const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
       return new textToSpeech.TextToSpeechClient({ credentials });
     }
     
-    // 環境変数がない場合は単純に初期化（Netlifyの組み込み認証を使用）
-    return new textToSpeech.TextToSpeechClient();
+    // 認証情報が見つからない場合
+    console.error("認証情報がありません。環境変数を確認してください。");
+    throw new Error("Google Cloud認証情報が見つかりません");
   } catch (error) {
-    console.error('TTS Client initialization error:', error);
-    throw new Error('Google Cloud認証情報の初期化に失敗しました: ' + error.message);
+    console.error('TTS Client初期化エラー:', error);
+    throw error;
   }
 };
 
 exports.handler = async function(event, context) {
-  // Preflight requestへの対応
+  // CORSヘッダー
+  const headers = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS"
+  };
+  
+  // OPTIONSリクエスト
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "POST, OPTIONS"
-      },
-      body: ""
-    };
+    return { statusCode: 200, headers, body: "" };
   }
   
-  if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
-      },
-      body: JSON.stringify({ error: 'Method Not Allowed' })
-    };
-  }
-
+  console.log("TTS関数が呼び出されました");
+  
   try {
-    // リクエストのJSONパース
+    // リクエストのパース
     let requestBody;
     try {
-      requestBody = JSON.parse(event.body);
+      requestBody = JSON.parse(event.body || '{}');
     } catch (parseError) {
+      console.error("JSONパースエラー:", parseError);
       return {
         statusCode: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
-        },
+        headers,
         body: JSON.stringify({
-          error: "無効なリクエスト形式です",
-          details: "JSONの解析に失敗しました"
+          error: "JSONパースエラー",
+          details: parseError.message
         })
       };
     }
@@ -87,10 +79,7 @@ exports.handler = async function(event, context) {
     if (!text?.trim()) {
       return {
         statusCode: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
-        },
+        headers,
         body: JSON.stringify({ 
           error: "テキストが空です",
           details: "音声合成するテキストを入力してください"
@@ -98,8 +87,9 @@ exports.handler = async function(event, context) {
       };
     }
 
-    // テキストを修正（辞書を使用）
+    // テキストを修正
     const fixed = fixPronunciation(text);
+    console.log("変換後テキスト:", fixed.substring(0, 50) + "...");
 
     // SSML形式に変換
     const ssmlText = `<speak>${fixed}</speak>`;
@@ -109,11 +99,13 @@ exports.handler = async function(event, context) {
       const client = getClient();
 
       // Google TTSにリクエスト
+      console.log("TTS APIリクエスト送信");
       const [response] = await client.synthesizeSpeech({
         input: { ssml: ssmlText },
         voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
         audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
       });
+      console.log("TTS API応答受信成功");
 
       // Base64エンコード
       const audioContent = Buffer.from(response.audioContent).toString('base64');
@@ -121,22 +113,17 @@ exports.handler = async function(event, context) {
 
       return {
         statusCode: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
-        },
+        headers,
         body: JSON.stringify({ audioUrl })
       };
     } catch (ttsError) {
-      console.error('TTS specific error:', ttsError);
+      console.error('TTS固有エラー:', ttsError);
+      console.error('スタックトレース:', ttsError.stack);
       
       // フォールバック：テキストのみを返す
       return {
         statusCode: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
-        },
+        headers,
         body: JSON.stringify({ 
           text: fixed,
           error: "音声合成できませんでした",
@@ -145,13 +132,10 @@ exports.handler = async function(event, context) {
       };
     }
   } catch (e) {
-    console.error('TTS error:', e);
+    console.error('TTS一般エラー:', e);
     return {
       statusCode: 500,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
-      },
+      headers,
       body: JSON.stringify({ 
         error: 'TTS処理失敗', 
         details: e.message 
