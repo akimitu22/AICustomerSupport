@@ -23,84 +23,65 @@ function fixPronunciation(text) {
   return fixed;
 }
 
-// Google Cloud認証情報を環境変数から取得する
-function getCredentials() {
-  console.log("認証情報を取得中...");
-  
-  // 環境変数からJSONを取得
-  if (process.env.GOOGLE_CREDENTIALS_JSON) {
-    console.log("GOOGLE_CREDENTIALS_JSON環境変数を使用");
-    
-    try {
-      const content = process.env.GOOGLE_CREDENTIALS_JSON;
-      
-      // Base64かどうかをチェック
-      // Base64の特徴: 基本的に英数字と+/=だけで構成される
-      const isBase64 = /^[A-Za-z0-9+/=]+$/.test(content);
-      
-      if (isBase64) {
-        console.log("Base64形式として処理");
-        try {
-          // Base64をデコード
-          const decodedContent = Buffer.from(content, 'base64').toString('utf8');
-          
-          // JSONとして解析
-          return JSON.parse(decodedContent);
-        } catch (e) {
-          console.error("Base64デコードまたはJSON解析エラー:", e.message);
-          throw new Error("Base64デコードまたはJSON解析に失敗しました");
-        }
-      } else {
-        // 通常のJSONとして解析
-        console.log("通常のJSON形式として処理");
-        return JSON.parse(content);
-      }
-    } catch (e) {
-      console.error("認証情報の解析エラー:", e.message);
-      throw new Error("認証情報のJSON解析に失敗: " + e.message);
-    }
-  }
-  
-  // 他の環境変数をチェック
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    console.log("GOOGLE_APPLICATION_CREDENTIALS環境変数を検出");
-    const content = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-    
-    // JSONらしき形式かチェック
-    if (content.startsWith('{') && content.includes('"type"')) {
-      try {
-        // JSONとして解析
-        return JSON.parse(content);
-      } catch (e) {
-        console.error("JSON解析エラー:", e.message);
-      }
-    }
-    
-    // ファイルパスと判断
-    throw new Error("ファイルパスではなくJSON文字列が必要です");
-  }
-  
-  // どの環境変数も見つからない
-  throw new Error("認証情報が見つかりません。GOOGLE_CREDENTIALS_JSON環境変数を設定してください");
-}
-
-// TTSクライアントの初期化
+// 単純化したTTSクライアント初期化
 function getClient() {
   try {
-    console.log("TTSクライアント初期化開始");
+    console.log("TTSクライアント初期化 - 単純化アプローチ");
     
-    // 認証情報を取得
-    const credentials = getCredentials();
-    
-    // 既存の環境変数をバックアップして削除（副作用防止）
+    // 重要: 既存の環境変数を削除（他のライブラリの干渉を防ぐ）
     const originalValue = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
     
-    // クライアント初期化
+    // コンフィグをログ（機密情報を含まないように注意）
+    console.log("環境変数の存在確認:");
+    console.log("- GOOGLE_CREDENTIALS_JSON:", !!process.env.GOOGLE_CREDENTIALS_JSON);
+    console.log("- GOOGLE_APPLICATION_CREDENTIALS (削除前):", !!originalValue);
+    
+    // 認証情報JSONの解析を試みる
+    let credentials;
+    
+    if (process.env.GOOGLE_CREDENTIALS_JSON) {
+      try {
+        credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+        console.log("JSON直接解析成功");
+      } catch (e) {
+        console.log("直接解析エラー、プレーンテキスト解析に移行");
+        try {
+          // Base64解析を試みる（try/catchではなく条件分岐）
+          if (/^eyJ/.test(process.env.GOOGLE_CREDENTIALS_JSON)) {
+            console.log("JSONらしき形式を検出、直接使用");
+            credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+          } else {
+            // Base64デコードを試みる
+            const decoded = Buffer.from(process.env.GOOGLE_CREDENTIALS_JSON, 'base64').toString('utf8');
+            console.log("Base64デコード完了、JSON解析を試みる");
+            credentials = JSON.parse(decoded);
+          }
+        } catch (e2) {
+          console.error("解析エラー:", e2.message);
+          throw new Error("認証情報の解析に失敗しました: " + e2.message);
+        }
+      }
+    } else if (originalValue) {
+      // バックアップとして元の環境変数を使用（JSONのみ）
+      if (originalValue.trim().startsWith('{')) {
+        try {
+          credentials = JSON.parse(originalValue);
+        } catch (e) {
+          throw new Error("GOOGLE_APPLICATION_CREDENTIALSのJSON解析に失敗: " + e.message);
+        }
+      } else {
+        throw new Error("ファイルパスではなくJSON文字列が必要です");
+      }
+    } else {
+      throw new Error("Google Cloud認証情報が見つかりません");
+    }
+    
+    // クライアント初期化（環境変数依存なし）
     const client = new textToSpeech.TextToSpeechClient({ credentials });
     
-    // 環境変数を復元
-    if (originalValue !== undefined) {
+    // 環境変数を復元（他のライブラリへの影響を防ぐ）
+    if (originalValue) {
       process.env.GOOGLE_APPLICATION_CREDENTIALS = originalValue;
     }
     
@@ -159,15 +140,15 @@ exports.handler = async function(event, context) {
 
     // テキストを修正
     const fixed = fixPronunciation(text);
-    console.log("テキスト処理完了:", fixed.substring(0, 30) + "...");
+    console.log("テキスト処理完了 (長さ:", fixed.length, "文字)");
 
     // SSML形式に変換
     const ssmlText = `<speak>${fixed}</speak>`;
 
     try {
-      // TTSクライアント取得
+      // クライアントの初期化
       const client = getClient();
-      
+
       // Google TTSにリクエスト
       console.log("TTS APIリクエスト送信");
       const [response] = await client.synthesizeSpeech({
@@ -180,7 +161,7 @@ exports.handler = async function(event, context) {
       // Base64エンコード
       const audioContent = Buffer.from(response.audioContent).toString('base64');
       const audioUrl = `data:audio/mpeg;base64,${audioContent}`;
-      console.log("音声データエンコード完了:", audioContent.length, "バイト");
+      console.log("音声データエンコード完了 (サイズ:", Math.round(audioContent.length / 1024), "KB)");
 
       return {
         statusCode: 200,
@@ -188,7 +169,20 @@ exports.handler = async function(event, context) {
         body: JSON.stringify({ audioUrl })
       };
     } catch (ttsError) {
-      console.error("TTS API呼び出しエラー:", ttsError.message);
+      console.error('TTS API呼び出しエラー:', ttsError.message);
+      
+      if (ttsError.message.includes('Authentication')) {
+        console.error('認証エラーの可能性があります。環境変数を確認してください');
+        return {
+          statusCode: 401,
+          headers,
+          body: JSON.stringify({ 
+            text: fixed,
+            error: "Google Cloud認証エラー",
+            errorDetail: ttsError.message 
+          })
+        };
+      }
       
       // フォールバック：テキストのみを返す
       return {
@@ -202,12 +196,12 @@ exports.handler = async function(event, context) {
       };
     }
   } catch (e) {
-    console.error("TTS処理エラー:", e.message);
+    console.error('TTS一般エラー:', e.message);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({ 
-        error: "TTS処理失敗", 
+        error: 'TTS処理失敗', 
         details: e.message 
       })
     };
