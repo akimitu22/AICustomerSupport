@@ -21,4 +21,4 @@ models/
 models/whisper/
 *.bin
 *-base.bin
-*-model*.bin
+*-model*.bin"aicustomersupport-*.json" 
