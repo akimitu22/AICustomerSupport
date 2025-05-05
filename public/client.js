@@ -63,22 +63,47 @@ function stopRecording(){
 }
 
 /* ───────── Whisper → GPT → TTS ───────── */
-async function handleRecordingStop(){
-  const blob = new Blob(recordingChunks,{type:'audio/webm'});
-  const fd=new FormData();
-  fd.append('audio',blob,'audio.webm');
-  fd.append('duration',((Date.now()-recordingStartTime)/1000).toString());
-
-  try{
-    statusEl.textContent='🧠 発話認識中…';
-    // APIパスを変更:
-    const stt=await fetch('/.netlify/functions/stt',{method:'POST',body:fd}).then(r=>r.json());
-    if(!stt.text?.trim()){statusEl.textContent='❌ 発話認識失敗'; vadActive=true; return;}
+async function handleRecordingStop() {
+  const blob = new Blob(recordingChunks, {type: 'audio/webm'});
+  
+  try {
+    statusEl.textContent = '🧠 発話認識中…';
+    
+    // Base64エンコード処理
+    const arrayBuffer = await blob.arrayBuffer();
+    const base64Data = btoa(
+      new Uint8Array(arrayBuffer).reduce(
+        (data, byte) => data + String.fromCharCode(byte), ''
+      )
+    );
+    
+    // JSONで送信
+    const stt = await fetch('/.netlify/functions/stt', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        audio: base64Data,
+        format: 'webm',
+        duration: (Date.now() - recordingStartTime) / 1000
+      })
+    }).then(r => r.json());
+    
+    // 以下は既存の処理と同様
+    if (!stt.text?.trim()) {
+      statusEl.textContent = '❌ 発話認識失敗';
+      vadActive = true;
+      return;
+    }
+    
     let fixedText = stt.text.replace(/ご視聴ありがとうございました/g, 'ご回答ありがとうございました');
     recogEl.textContent = `お問合せ内容: ${fixedText}`;
     await handleAI(stt.text);
-  }catch(e){
-    console.error(e); statusEl.textContent='❌ 発話認識失敗'; vadActive=true;
+  } catch (e) {
+    console.error('音声認識エラー:', e);
+    statusEl.textContent = '❌ 発話認識失敗';
+    vadActive = true;
   }
 }
 
