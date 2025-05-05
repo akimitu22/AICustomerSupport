@@ -5,6 +5,14 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
   external_node_modules = ["axios", "form-data"]
+
+[functions.stt]
+  timeout = 26
+
+[functions.ai]
+  timeout = 26
+
+[functions.tts]
   timeout = 26
 
 [[redirects]]
