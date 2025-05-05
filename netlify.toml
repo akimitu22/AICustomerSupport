@@ -1,34 +1,26 @@
 [build]
   publish = "public"
-  command = "# no build command"
-
-[dev]
-  command = "npm run dev"
-  port = 8888
-  targetPort = 3000
-  publish = "public"
-  framework = "#custom"
 
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
-
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
+  external_node_modules = ["axios", "form-data"]
+  timeout = 26
 
 [[redirects]]
   from = "/stt"
   to = "/.netlify/functions/stt"
   status = 200
+  force = true
 
 [[redirects]]
   from = "/ai"
   to = "/.netlify/functions/ai"
   status = 200
+  force = true
 
 [[redirects]]
   from = "/tts"
   to = "/.netlify/functions/tts"
   status = 200
+  force = true
