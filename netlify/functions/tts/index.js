@@ -23,46 +23,30 @@ function fixPronunciation(text) {
   return fixed;
 }
 
-// 元コードからの流用: 認証情報処理
-function loadGoogleCredentials() {
-  const env = process.env.GOOGLE_APPLICATION_CREDENTIALS || '';
-  if (!env) return null;
+// ハードコードされた認証情報（JSON形式のみ、直接APIに渡す）
+const credentials = {
+  // 以下にサービスアカウントキーの内容をコピーペースト
+  "type": "service_account",
+  "project_id": "aicustomersupport-458610",
+  // 各フィールドを適切に設定
+};
 
-  // 1) そのまま JSON
-  if (env.trim().startsWith('{')) {
-    console.log("JSON形式の認証情報を使用");
-    return JSON.parse(env);
-  }
-
-  // 2) Base64-encoded JSON
-  try {
-    console.log("Base64デコードを試行");
-    const decoded = Buffer.from(env, 'base64').toString('utf8');
-    if (decoded.trim().startsWith('{')) {
-      console.log("Base64デコード成功、JSON解析");
-      return JSON.parse(decoded);
-    }
-  } catch (e) {
-    console.log("Base64デコード失敗", e.message);
-  }
-
-  // 3) ファイルパスの場合
-  console.log("ファイルパスと見なされる可能性があります:", env.substring(0, 20) + "...");
-  return null;
-}
-
+// TTSクライアント初期化 - 環境変数に依存しない
 function getClient() {
   try {
-    // 環境変数を一時退避
-    const originalValue = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    console.log("TTSクライアント初期化 - 直接認証情報を使用");
     
-    // 認証情報の取得
-    const credentials = loadGoogleCredentials();
+    // 環境変数をクリア
+    const origValue = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
     
-    // クライアント初期化
-    const client = credentials
-      ? new textToSpeech.TextToSpeechClient({ credentials })
-      : new textToSpeech.TextToSpeechClient();
+    // 直接認証情報を使用してクライアント初期化
+    const client = new textToSpeech.TextToSpeechClient({ credentials });
+    
+    // 環境変数を復元
+    if (origValue) {
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = origValue;
+    }
     
     console.log("TTSクライアント初期化成功");
     return client;
