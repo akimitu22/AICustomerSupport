@@ -1,12 +1,15 @@
 const textToSpeech = require('@google-cloud/text-to-speech');
-const util = require('util');
 
-let client;
-try {
-  client = new textToSpeech.TextToSpeechClient();
-} catch (error) {
-  console.error('Failed to initialize TTS client:', error);
-}
+// Google Cloud認証情報をJSON文字列から設定
+const getClient = () => {
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+    const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+    return new textToSpeech.TextToSpeechClient({ credentials });
+  }
+  
+  // 環境変数がない場合は単純に初期化（Netlifyの組み込み認証を使用）
+  return new textToSpeech.TextToSpeechClient();
+};
 
 exports.handler = async function(event, context) {
   if (event.httpMethod !== 'POST') {
@@ -39,21 +42,38 @@ exports.handler = async function(event, context) {
     // SSML形式に変換
     const ssmlText = `<speak>${fixed}</speak>`;
 
-    // Google TTSにリクエスト
-    const [response] = await client.synthesizeSpeech({
-      input: { ssml: ssmlText },
-      voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
-      audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
-    });
+    try {
+      // クライアントの初期化
+      const client = getClient();
 
-    // Base64エンコード
-    const audioContent = Buffer.from(response.audioContent).toString('base64');
-    const audioUrl = `data:audio/mpeg;base64,${audioContent}`;
+      // Google TTSにリクエスト
+      const [response] = await client.synthesizeSpeech({
+        input: { ssml: ssmlText },
+        voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
+        audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
+      });
 
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ audioUrl })
-    };
+      // Base64エンコード
+      const audioContent = Buffer.from(response.audioContent).toString('base64');
+      const audioUrl = `data:audio/mpeg;base64,${audioContent}`;
+
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ audioUrl })
+      };
+    } catch (ttsError) {
+      console.error('TTS specific error:', ttsError);
+      
+      // フォールバック：テキストのみを返す
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ 
+          text: fixed,
+          error: "音声合成できませんでした",
+          errorDetail: ttsError.message 
+        })
+      };
+    }
   } catch (e) {
     console.error('TTS error:', e);
     return {

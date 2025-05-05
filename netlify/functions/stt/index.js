@@ -11,15 +11,11 @@ exports.handler = async function(event, context) {
 
   try {
     // Base64エンコードされた音声データを取得
-    const body = JSON.parse(event.body);
-    const audioData = body.audio;
-
-    // FormData作成
     const formData = new FormData();
-    formData.append('file', Buffer.from(audioData, 'base64'), {
-      filename: 'audio.webm',
-      contentType: 'audio/webm'
-    });
+    
+    // マルチパートフォームデータをパース
+    const blob = Buffer.from(event.body, 'base64');
+    formData.append('file', blob, { filename: 'audio.webm', contentType: 'audio/webm' });
     formData.append('model', 'whisper-1');
     formData.append('language', 'ja');
 
