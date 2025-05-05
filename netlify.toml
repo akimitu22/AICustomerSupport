@@ -17,3 +17,18 @@
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
+
+[[redirects]]
+  from = "/stt"
+  to = "/.netlify/functions/stt"
+  status = 200
+
+[[redirects]]
+  from = "/ai"
+  to = "/.netlify/functions/ai"
+  status = 200
+
+[[redirects]]
+  from = "/tts"
+  to = "/.netlify/functions/tts"
+  status = 200

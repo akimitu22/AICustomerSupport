@@ -71,7 +71,8 @@ async function handleRecordingStop(){
 
   try{
     statusEl.textContent='🧠 発話認識中…';
-    const stt=await fetch('/stt',{method:'POST',body:fd}).then(r=>r.json());
+    // APIパスを変更:
+    const stt=await fetch('/.netlify/functions/stt',{method:'POST',body:fd}).then(r=>r.json());
     if(!stt.text?.trim()){statusEl.textContent='❌ 発話認識失敗'; vadActive=true; return;}
     let fixedText = stt.text.replace(/ご視聴ありがとうございました/g, 'ご回答ありがとうございました');
     recogEl.textContent = `お問合せ内容: ${fixedText}`;
@@ -84,7 +85,8 @@ async function handleRecordingStop(){
 async function handleAI(msg){
   try{
     statusEl.textContent='💭 回答生成中…';
-    const ai=await fetch('/ai',{
+    // APIパスを変更:
+    const ai=await fetch('/.netlify/functions/ai',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({message:msg,sessionId:currentSessionId})
@@ -97,7 +99,8 @@ async function handleAI(msg){
     setTimeout(()=>{replyEl.textContent=`サポートからの回答: ${ai.reply}`;},500);
 
     statusEl.textContent='🔊 回答生成中…';
-    const tts=await fetch('/tts',{
+    // APIパスを変更:
+    const tts=await fetch('/.netlify/functions/tts',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({text:ai.reply})
