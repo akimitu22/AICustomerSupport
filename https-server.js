@@ -8,9 +8,9 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import 'dotenv/config';
 import ffmpegPath from 'ffmpeg-static';
-import { kindergartenQA } from './QandA.js';
 import KuroshiroModule from 'kuroshiro';
 import KuromojiAnalyzer from 'kuroshiro-analyzer-kuromoji';
+import { kindergartenQA } from './QandA.json';
 
 const Kuroshiro = KuroshiroModule.default;
 const kuro = new Kuroshiro();
@@ -91,7 +91,7 @@ function analyzeStage(msg, stage) {
 function systemPrompt() {
   return `ホザナ幼稚園の入園コンシェルジュです。園に関する質問に250文字程度で親切・丁寧に回答してください。
 
-以下のQ&A情報を必ず参考にしてください。しかし、単に情報をそのまま繰り返すのではなく、自然な対話を心がけて回答してください。
+以下のQandA情報を必ず参考にしてください。しかし、単に情報をそのまま繰り返すのではなく、自然な対話を心がけて回答してください。
 
 ※見学を希望される方には「このページ上部の見学予約ボタンからお申し込みください」と案内してください。
 ※電話番号は絶対に読み上げないでください。
@@ -124,9 +124,9 @@ app.post('/ai', async (req, res) => {
             role: 'system',
             content: `${systemPrompt()}
 
-以下はホザナ幼稚園の公式Q&Aです。これらの情報を元に、自然な会話を心がけて回答してください。同じ質問に対しても少し表現を変えるなど、バリエーションを持たせてください：
+以下はホザナ幼稚園の公式QandAです。これらの情報を元に、自然な会話を心がけて回答してください。同じ質問に対しても少し表現を変えるなど、バリエーションを持たせてください：
 
------ Q&A -----
+----- QandA -----
 ${qaContext}
 ----------------`
           },
@@ -150,12 +150,29 @@ ${qaContext}
 });
 
 /* ───── TTS (Google APIキー方式) ───── */
+// マークダウンをSSMLに変換
 function convertMarkdownToSSML(text) {
   return text
     .replace(/^#{1,6}\s*/gm, '')
     .replace(/\*\*(.+?)\*\*/g, '<emphasis level="moderate">$1</emphasis>')
     .replace(/\*(.+?)\*/g, '<emphasis level="reduced">$1</emphasis>')
     .replace(/__(.+?)__/g, '<emphasis level="strong">$1</emphasis>');
+}
+
+// 電話番号をSSML形式に変換
+function formatPhoneNumbers(text) {
+  return text.replace(
+    /(\d{2,4})[-\s]?(\d{2,4})[-\s]?(\d{2,4})/g, 
+    '<say-as interpret-as="telephone">$1-$2-$3</say-as>'
+  );
+}
+
+// URLや特殊文字を音声用に調整
+function optimizeTextForSpeech(text) {
+  return text
+    .replace(/https?:\/\/[^\s]+/g, 'ホームページのリンク')
+    .replace(/\n+/g, '<break time="500ms"/>')
+    .replace(/([。、．，！？])\s*/g, '$1<break time="300ms"/>');
 }
 
 async function synthesize(text) {
@@ -170,7 +187,11 @@ async function synthesize(text) {
     .replace(/園/g, 'えん')
     .replace(/大坪園子/g, 'おおつぼそのこ');
 
-  const ssmlText = `<speak>${convertMarkdownToSSML(fixed)}</speak>`;
+  let processedText = convertMarkdownToSSML(fixed);
+  processedText = formatPhoneNumbers(processedText);
+  processedText = optimizeTextForSpeech(processedText);
+  
+  const ssmlText = `<speak>${processedText}</speak>`;
 
   try {
     const { data } = await axios.post(
@@ -178,7 +199,12 @@ async function synthesize(text) {
       {
         input: { ssml: ssmlText },
         voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
-        audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
+        audioConfig: { 
+          audioEncoding: 'MP3', 
+          speakingRate: 1.15,
+          pitch: 0.0,
+          volumeGainDb: 0.0
+        }
       }
     );
 
@@ -192,7 +218,11 @@ async function synthesize(text) {
         {
           input: { ssml: ssmlText },
           voice: { languageCode: 'ja-JP', name: 'ja-JP-Standard-B' },
-          audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
+          audioConfig: { 
+            audioEncoding: 'MP3', 
+            speakingRate: 1.15,
+            pitch: 0.0
+          }
         }
       );
       return `data:audio/mpeg;base64,${data.audioContent}`;
@@ -228,7 +258,12 @@ app.post('/tts', async (req, res) => {
         {
           input: { ssml: finalSSML },
           voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
-          audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
+          audioConfig: { 
+            audioEncoding: 'MP3', 
+            speakingRate: 1.15,
+            pitch: 0.0,
+            volumeGainDb: 0.0
+          }
         }
       );
       audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
