@@ -31,15 +31,31 @@ exports.handler = async (event) => {
       // SSMLが提供されている場合はそれを使用
       requestBody = {
         input: { ssml: ssml.includes('<speak>') ? ssml : `<speak>${ssml}</speak>` },
-        voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
-        audioConfig: { audioEncoding: 'MP3' },
+        voice: { 
+          languageCode: 'ja-JP', 
+          name: 'ja-JP-Neural2-B', // 特定の音声モデルを指定
+          ssmlGender: 'NEUTRAL' 
+        },
+        audioConfig: { 
+          audioEncoding: 'MP3',
+          speakingRate: 1.15,  // 読み上げ速度の最適化
+          pitch: 0.0           // ピッチの最適化
+        },
       };
     } else {
       // 通常のテキスト入力
       requestBody = {
         input: { text },
-        voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
-        audioConfig: { audioEncoding: 'MP3' },
+        voice: { 
+          languageCode: 'ja-JP', 
+          name: 'ja-JP-Neural2-B', // 特定の音声モデルを指定
+          ssmlGender: 'NEUTRAL' 
+        },
+        audioConfig: { 
+          audioEncoding: 'MP3',
+          speakingRate: 1.15,  // 読み上げ速度の最適化
+          pitch: 0.0           // ピッチの最適化
+        },
       };
     }
 
