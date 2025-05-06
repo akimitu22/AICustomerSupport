@@ -121,7 +121,7 @@ async function handleAI(msg){
     statusEl.textContent='💭 回答生成中…';
     
     // 中間メッセージを表示
-    showInterimMessage("お調べいたしますので、しばらくお待ちください。");
+    showInterimMessage("しばらくお待ちください。");
     
     console.log("AIリクエスト送信開始:", msg);
     const ai = await fetch('/.netlify/functions/ai', {
