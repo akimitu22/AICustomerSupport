@@ -21,13 +21,13 @@ function optimizeJapaneseReading(text) {
     .replace(/大坪園子/g, 'おおつぼそのこ');
 }
 
-// マークダウンをシンプルテキストに変換
-function cleanMarkdown(text) {
+// マークダウンをSSMLに変換
+function convertMarkdownToSSML(text) {
   return text
     .replace(/^#{1,6}\s*/gm, '')
-    .replace(/\*\*(.+?)\*\*/g, '$1')
-    .replace(/\*(.+?)\*/g, '$1')
-    .replace(/__(.+?)__/g, '$1');
+    .replace(/\*\*(.+?)\*\*/g, '<emphasis level="moderate">$1</emphasis>')
+    .replace(/\*(.+?)\*/g, '<emphasis level="reduced">$1</emphasis>')
+    .replace(/__(.+?)__/g, '<emphasis level="strong">$1</emphasis>');
 }
 
 // URLを読みやすくする
@@ -36,13 +36,36 @@ function optimizeUrlsForSpeech(text) {
     .replace(/https?:\/\/[^\s]+/g, 'ホームページのリンク');
 }
 
-// 電話番号をフォーマット
+// 電話番号をSSML形式に変換
 function formatPhoneNumbers(text) {
   // 電話番号のパターン (例: 048-555-2301)
   return text.replace(
     /(\d{2,4})[-\s]?(\d{2,4})[-\s]?(\d{2,4})/g, 
-    '$1 $2 $3'  // スペースで区切る
+    '<say-as interpret-as="telephone">$1-$2-$3</say-as>'
   );
+}
+
+// 句読点での自然なポーズを追加
+function addPauses(text) {
+  return text
+    .replace(/([。、．，！？])\s*/g, '$1<break time="300ms"/>')
+    .replace(/\n+/g, '<break time="500ms"/>');
+}
+
+// テキストをSSMLに変換（完全版）
+function textToSSML(text) {
+  let ssml = text;
+  
+  // マークダウンをSSMLに変換
+  ssml = convertMarkdownToSSML(ssml);
+  
+  // 電話番号をSSMLタグで囲む
+  ssml = formatPhoneNumbers(ssml);
+  
+  // 句読点での自然なポーズを追加
+  ssml = addPauses(ssml);
+  
+  return `<speak>${ssml}</speak>`;
 }
 
 exports.handler = async (event) => {
@@ -71,32 +94,35 @@ exports.handler = async (event) => {
         input: { ssml: ssml.includes('<speak>') ? ssml : `<speak>${ssml}</speak>` },
         voice: { 
           languageCode: 'ja-JP', 
-          name: 'ja-JP-Standard-B'  // 元々使用していたモデルを指定
+          name: 'ja-JP-Standard-B'
         },
         audioConfig: { 
           audioEncoding: 'MP3',
-          speakingRate: 1.15  // 読み上げ速度の最適化
+          speakingRate: 1.15
         },
       };
     } else {
       // 通常のテキスト入力の前処理
       let processedText = text;
       
-      // 前処理を適用
+      // 日本語の読み最適化
       processedText = optimizeJapaneseReading(processedText);
-      processedText = cleanMarkdown(processedText);
+      
+      // URLを読みやすくする
       processedText = optimizeUrlsForSpeech(processedText);
-      processedText = formatPhoneNumbers(processedText);
+      
+      // SSMLに変換（マークダウン、電話番号、ポーズなど）
+      const processedSSML = textToSSML(processedText);
       
       requestBody = {
-        input: { text: processedText },
+        input: { ssml: processedSSML },
         voice: { 
           languageCode: 'ja-JP', 
-          name: 'ja-JP-Standard-B'  // 元々使用していたモデルを指定
+          name: 'ja-JP-Standard-B'
         },
         audioConfig: { 
           audioEncoding: 'MP3',
-          speakingRate: 1.15  // 読み上げ速度の最適化
+          speakingRate: 1.15
         },
       };
     }
