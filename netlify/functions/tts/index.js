@@ -7,6 +7,35 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+// 日本語の読み最適化
+function optimizeJapaneseReading(text) {
+  return text
+    .replace(/副園長/g, 'ふくえんちょう')
+    .replace(/入園/g, 'にゅうえん')
+    .replace(/園長/g, 'えんちょう')
+    .replace(/幼稚園/g, 'ようちえん')
+    .replace(/園庭/g, 'えんてい')
+    .replace(/園児/g, 'えんじ')
+    .replace(/他園/g, 'たえん')
+    .replace(/園/g, 'えん')
+    .replace(/大坪園子/g, 'おおつぼそのこ');
+}
+
+// マークダウンをシンプルテキストに変換
+function cleanMarkdown(text) {
+  return text
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1');
+}
+
+// URLを読みやすくする
+function optimizeUrlsForSpeech(text) {
+  return text
+    .replace(/https?:\/\/[^\s]+/g, 'ホームページのリンク');
+}
+
 exports.handler = async (event) => {
   // ─ OPTIONS
   if (event.httpMethod === 'OPTIONS') {
@@ -31,31 +60,22 @@ exports.handler = async (event) => {
       // SSMLが提供されている場合はそれを使用
       requestBody = {
         input: { ssml: ssml.includes('<speak>') ? ssml : `<speak>${ssml}</speak>` },
-        voice: { 
-          languageCode: 'ja-JP', 
-          name: 'ja-JP-Neural2-B', // 特定の音声モデルを指定
-          ssmlGender: 'NEUTRAL' 
-        },
-        audioConfig: { 
-          audioEncoding: 'MP3',
-          speakingRate: 1.15,  // 読み上げ速度の最適化
-          pitch: 0.0           // ピッチの最適化
-        },
+        voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
+        audioConfig: { audioEncoding: 'MP3' },
       };
     } else {
-      // 通常のテキスト入力
+      // 通常のテキスト入力の前処理
+      let processedText = text;
+      
+      // 前処理を適用
+      processedText = optimizeJapaneseReading(processedText);
+      processedText = cleanMarkdown(processedText);
+      processedText = optimizeUrlsForSpeech(processedText);
+      
       requestBody = {
-        input: { text },
-        voice: { 
-          languageCode: 'ja-JP', 
-          name: 'ja-JP-Neural2-B', // 特定の音声モデルを指定
-          ssmlGender: 'NEUTRAL' 
-        },
-        audioConfig: { 
-          audioEncoding: 'MP3',
-          speakingRate: 1.15,  // 読み上げ速度の最適化
-          pitch: 0.0           // ピッチの最適化
-        },
+        input: { text: processedText },
+        voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
+        audioConfig: { audioEncoding: 'MP3' },
       };
     }
 
