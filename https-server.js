@@ -8,7 +8,6 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import 'dotenv/config';
 import ffmpegPath from 'ffmpeg-static';
-import textToSpeech from '@google-cloud/text-to-speech';
 import { kindergartenQA } from './QandA.js';
 import KuroshiroModule from 'kuroshiro';
 import KuromojiAnalyzer from 'kuroshiro-analyzer-kuromoji';
@@ -22,8 +21,6 @@ const app = express();
 const upload = multer({ dest: 'uploads/' });
 const sessionStorage = {};
 
-/* ───── Whisper STT ───── */
-
 app.use(express.json());
 app.use(express.static('public'));
 
@@ -35,6 +32,7 @@ const STAGES = {
   ACTION: 'action'
 };
 
+/* ───── Whisper STT ───── */
 app.post('/stt', upload.single('audio'), async (req, res) => {
   try {
     const audioPath = req.file.path;
@@ -81,7 +79,6 @@ app.post('/stt', upload.single('audio'), async (req, res) => {
 });
 
 /* ───── ChatGPT ───── */
-
 function analyzeStage(msg, stage) {
   const kw = ['見学', '説明会', '願書', '入園'];
   if (stage === STAGES.INITIAL && kw.some(w => msg.includes(w))) return STAGES.INTEREST;
@@ -148,33 +145,7 @@ ${qaContext}
   }
 });
 
-/* ───── Google TTS ───── */
-
-/* ★★★ ここだけ変更 ★★★ */
-function loadGoogleCredentials() {
-  const b64 = process.env.GOOGLE_CREDENTIALS_B64 || '';
-  if (!b64.trim()) {
-    throw new Error('GOOGLE_CREDENTIALS_B64 is not set');
-  }
-  try {
-    const json = Buffer.from(b64, 'base64').toString('utf8');
-    return JSON.parse(json);
-  } catch (err) {
-    throw new Error(`GOOGLE_CREDENTIALS_B64 is invalid: ${err.message}`);
-  }
-}
-/* ★★★ 変更ここまで ★★★ */
-
-let googleCreds;
-try {
-  googleCreds = loadGoogleCredentials();
-} catch (error) {
-  console.error('Error loading Google credentials:', error.message);
-  throw error;
-}
-
-const gTTS = new textToSpeech.TextToSpeechClient({ credentials: googleCreds });
-
+/* ───── TTS (Google APIキー方式) ───── */
 function convertMarkdownToSSML(text) {
   return text
     .replace(/^#{1,6}\s*/gm, '')
@@ -196,13 +167,17 @@ async function synthesize(text) {
     .replace(/大坪園子/g, 'おおつぼそのこ');
 
   const ssmlText = `<speak>${convertMarkdownToSSML(fixed)}</speak>`;
-  const [resp] = await gTTS.synthesizeSpeech({
-    input: { ssml: ssmlText },
-    voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
-    audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
-  });
 
-  return `data:audio/mpeg;base64,${Buffer.from(resp.audioContent).toString('base64')}`;
+  const { data } = await axios.post(
+    `https://texttospeech.googleapis.com/v1/text:synthesize?key=${process.env.GOOGLE_API_KEY}`,
+    {
+      input: { ssml: ssmlText },
+      voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
+      audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
+    }
+  );
+
+  return `data:audio/mpeg;base64,${data.audioContent}`;
 }
 
 app.post('/tts', async (req, res) => {
@@ -212,10 +187,9 @@ app.post('/tts', async (req, res) => {
     const audioUrl = await synthesize(text);
     res.json({ audioUrl });
   } catch (e) {
-    console.error('TTS error:', e);
+    console.error('TTS error:', e.response?.data || e.message);
     res.status(500).json({ error: 'TTS失敗' });
   }
 });
 
-// ポート3000のリスナーを削除し、Expressアプリをエクスポート
 module.exports = app;
