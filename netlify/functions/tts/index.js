@@ -36,23 +36,13 @@ function optimizeUrlsForSpeech(text) {
     .replace(/https?:\/\/[^\s]+/g, 'ホームページのリンク');
 }
 
-// 電話番号をSSML形式に変換
+// 電話番号をフォーマット
 function formatPhoneNumbers(text) {
   // 電話番号のパターン (例: 048-555-2301)
   return text.replace(
     /(\d{2,4})[-\s]?(\d{2,4})[-\s]?(\d{2,4})/g, 
-    '<say-as interpret-as="telephone">$1-$2-$3</say-as>'
+    '$1 $2 $3'  // スペースで区切る
   );
-}
-
-// テキストをSSMLに変換
-function textToSSML(text) {
-  let ssml = text;
-  // 電話番号をSSMLタグで囲む
-  ssml = formatPhoneNumbers(ssml);
-  // 文章の区切りでポーズを追加
-  ssml = ssml.replace(/([。！？])\s*/g, '$1<break time="500ms"/>');
-  return `<speak>${ssml}</speak>`;
 }
 
 exports.handler = async (event) => {
@@ -82,7 +72,7 @@ exports.handler = async (event) => {
         voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
         audioConfig: { 
           audioEncoding: 'MP3',
-          speakingRate: 1.1  // 少し早めの読み上げ速度
+          speakingRate: 1.15  // 読み上げ速度の最適化
         },
       };
     } else {
@@ -93,25 +83,16 @@ exports.handler = async (event) => {
       processedText = optimizeJapaneseReading(processedText);
       processedText = cleanMarkdown(processedText);
       processedText = optimizeUrlsForSpeech(processedText);
-      
-      // 利用可能なSSML機能を適用
-      const processedSSML = textToSSML(processedText);
+      processedText = formatPhoneNumbers(processedText);
       
       requestBody = {
-        input: { ssml: processedSSML },
+        input: { text: processedText },
         voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
         audioConfig: { 
           audioEncoding: 'MP3',
-          speakingRate: 1.1  // 少し早めの読み上げ速度
+          speakingRate: 1.15  // 読み上げ速度の最適化
         },
       };
-    }
-
-    // モデル選択の試行（利用可能ならNeural2-Bを使用）
-    try {
-      requestBody.voice.name = 'ja-JP-Neural2-B';
-    } catch (e) {
-      console.log('Neural2-B not available, using default voice');
     }
 
     const resp = await fetch(
