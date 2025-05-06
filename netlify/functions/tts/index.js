@@ -1,6 +1,9 @@
 // netlify/functions/tts/index.js
 const fetch = require('node-fetch');
 
+// JSONファイルから直接読み込み
+const kindergartenQA = require('./QandA.json').kindergartenQA;
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type',
@@ -21,13 +24,13 @@ function optimizeJapaneseReading(text) {
     .replace(/大坪園子/g, 'おおつぼそのこ');
 }
 
-// マークダウンをSSMLに変換
-function convertMarkdownToSSML(text) {
+// マークダウンをシンプルテキストに変換
+function cleanMarkdown(text) {
   return text
     .replace(/^#{1,6}\s*/gm, '')
-    .replace(/\*\*(.+?)\*\*/g, '<emphasis level="moderate">$1</emphasis>')
-    .replace(/\*(.+?)\*/g, '<emphasis level="reduced">$1</emphasis>')
-    .replace(/__(.+?)__/g, '<emphasis level="strong">$1</emphasis>');
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1');
 }
 
 // URLを読みやすくする
@@ -45,25 +48,20 @@ function formatPhoneNumbers(text) {
   );
 }
 
-// 句読点での自然なポーズを追加
-function addPauses(text) {
+// ポーズと抑揚を追加
+function addProsody(text) {
   return text
     .replace(/([。、．，！？])\s*/g, '$1<break time="300ms"/>')
     .replace(/\n+/g, '<break time="500ms"/>');
 }
 
-// テキストをSSMLに変換（完全版）
+// テキストをSSMLに変換（統合関数）
 function textToSSML(text) {
-  let ssml = text;
-  
-  // マークダウンをSSMLに変換
-  ssml = convertMarkdownToSSML(ssml);
-  
-  // 電話番号をSSMLタグで囲む
+  let ssml = optimizeJapaneseReading(text);
+  ssml = cleanMarkdown(ssml);
+  ssml = optimizeUrlsForSpeech(ssml);
   ssml = formatPhoneNumbers(ssml);
-  
-  // 句読点での自然なポーズを追加
-  ssml = addPauses(ssml);
+  ssml = addProsody(ssml);
   
   return `<speak>${ssml}</speak>`;
 }
@@ -92,39 +90,35 @@ exports.handler = async (event) => {
       // SSMLが提供されている場合はそれを使用
       requestBody = {
         input: { ssml: ssml.includes('<speak>') ? ssml : `<speak>${ssml}</speak>` },
-        voice: { 
-          languageCode: 'ja-JP', 
-          name: 'ja-JP-Standard-B'
-        },
+        voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
         audioConfig: { 
           audioEncoding: 'MP3',
-          speakingRate: 1.15
+          speakingRate: 1.15,
+          pitch: 0.0,
+          volumeGainDb: 0.0
         },
       };
     } else {
       // 通常のテキスト入力の前処理
-      let processedText = text;
-      
-      // 日本語の読み最適化
-      processedText = optimizeJapaneseReading(processedText);
-      
-      // URLを読みやすくする
-      processedText = optimizeUrlsForSpeech(processedText);
-      
-      // SSMLに変換（マークダウン、電話番号、ポーズなど）
-      const processedSSML = textToSSML(processedText);
+      const processedSSML = textToSSML(text);
       
       requestBody = {
         input: { ssml: processedSSML },
-        voice: { 
-          languageCode: 'ja-JP', 
-          name: 'ja-JP-Standard-B'
-        },
+        voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
         audioConfig: { 
           audioEncoding: 'MP3',
-          speakingRate: 1.15
+          speakingRate: 1.15,
+          pitch: 0.0,
+          volumeGainDb: 0.0
         },
       };
+    }
+
+    // モデル選択を試行
+    try {
+      requestBody.voice.name = 'ja-JP-Standard-B';
+    } catch (e) {
+      console.log('Voice model specification failed, using default voice');
     }
 
     const resp = await fetch(
