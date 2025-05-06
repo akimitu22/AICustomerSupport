@@ -1,78 +1,55 @@
-// netlify/functions/tts/index.js
+// netlify/functions/tts/index.js  ←★これ1本だけを残す
 const fetch = require('node-fetch');
 
-const corsHeaders = {
+const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-exports.handler = async function (event, context) {
+exports.handler = async (event) => {
+  // ─ OPTIONS
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers: corsHeaders,
-      body: '',
-    };
+    return { statusCode: 200, headers: CORS, body: '' };
   }
 
   try {
-    const body = JSON.parse(event.body);
-    const text = body.text;
-    const apiKey = process.env.GOOGLE_API_KEY;
+    const { text = '' } = JSON.parse(event.body || '{}');
+    if (!text.trim()) throw new Error('text is empty');
 
-    if (!apiKey) {
-      throw new Error('GOOGLE_API_KEY is not set in environment variables.');
-    }
+    const key = process.env.GOOGLE_API_KEY;
+    if (!key) throw new Error('GOOGLE_API_KEY not set');
 
-    console.log("TTSリクエスト受信:", text);
-
-    const response = await fetch(
-      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
+    /* ── Google TTS ── */
+    const resp = await fetch(
+      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${key}`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           input: { text },
-          voice: {
-            languageCode: 'ja-JP',
-            ssmlGender: 'NEUTRAL',
-          },
-          audioConfig: {
-            audioEncoding: 'MP3',
-          },
+          voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
+          audioConfig: { audioEncoding: 'MP3' },
         }),
       }
-    );
+    ).then(r => r.json());
 
-    const data = await response.json();
+    if (!resp.audioContent) throw new Error(resp.error?.message || 'no audio');
 
-    if (!response.ok || !data.audioContent) {
-      throw new Error(data.error?.message || '音声データなし');
-    }
+    /* ─ data:URL にラップ ─ */
+    const audioUrl = `data:audio/mpeg;base64,${resp.audioContent}`;
 
     return {
       statusCode: 200,
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        audioContent: data.audioContent,
-        text,
-      }),
+      headers: { ...CORS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audioUrl }),
     };
-  } catch (error) {
-    console.error("TTS エラー:", error);
+  } catch (err) {
+    console.error('TTS error:', err);
     return {
       statusCode: 500,
-      headers: corsHeaders,
-      body: JSON.stringify({
-        error: '音声合成できませんでした',
-        errorDetail: error.message || '未知のエラー',
-      }),
+      headers: CORS,
+      body: JSON.stringify({ error: 'TTS failed', detail: err.message }),
     };
   }
 };
