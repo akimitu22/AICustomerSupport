@@ -1,5 +1,10 @@
 // netlify/functions/ai/index.js
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+
+// JSONファイルから直接Q&A情報を読み込み
+const kindergartenQA = require('./QandA.json').kindergartenQA;
 
 exports.handler = async function(event, context) {
   // Preflight requestへの対応
@@ -77,6 +82,11 @@ exports.handler = async function(event, context) {
     }
 
     const sid = sessionId || `s_${Date.now()}`;
+    
+    // Q&A情報をコンテキストに変換
+    const qaContext = kindergartenQA
+      .map(q => `Q: ${q.question}\nA: ${q.answer}`)
+      .join('\n');
 
     // OpenAI APIにリクエスト
     try {
@@ -88,11 +98,18 @@ exports.handler = async function(event, context) {
             {
               role: 'system',
               content: `ホザナ幼稚園の入園コンシェルジュです。園に関する質問に250文字程度で親切・丁寧に回答してください。
-              ※見学を希望される方には「このページ上部の見学予約ボタンからお申し込みください」と案内してください。
-              ※電話番号は絶対に読み上げないでください。
-              ※お問い合わせには「ホームページのお問い合わせフォームからどうぞ」と案内してください。
-              ※「電話でのお問い合わせ」という言葉や電話番号は絶対に使わないでください。
-              不明点は「園へお問い合わせください」と案内してください。`
+              
+以下のQ&A情報を必ず参考にして、正確な回答を提供してください。特に入園料、給食費、保育内容などの具体的な質問には、必ずこの情報から回答してください：
+
+----- Q&A 情報 -----
+${qaContext}
+---------------------
+
+※見学を希望される方には「このページ上部の見学予約ボタンからお申し込みください」と案内してください。
+※電話番号は絶対に読み上げないでください。
+※お問い合わせには「ホームページのお問い合わせフォームからどうぞ」と案内してください。
+※「電話でのお問い合わせ」という言葉や電話番号は絶対に使わないでください。
+不明点は「園へお問い合わせください」と案内してください。`
             },
             { role: 'user', content: message }
           ],
