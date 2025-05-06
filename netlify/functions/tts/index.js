@@ -69,7 +69,10 @@ exports.handler = async (event) => {
       // SSMLが提供されている場合はそれを使用
       requestBody = {
         input: { ssml: ssml.includes('<speak>') ? ssml : `<speak>${ssml}</speak>` },
-        voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
+        voice: { 
+          languageCode: 'ja-JP', 
+          name: 'ja-JP-Standard-B'  // 元々使用していたモデルを指定
+        },
         audioConfig: { 
           audioEncoding: 'MP3',
           speakingRate: 1.15  // 読み上げ速度の最適化
@@ -87,7 +90,10 @@ exports.handler = async (event) => {
       
       requestBody = {
         input: { text: processedText },
-        voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
+        voice: { 
+          languageCode: 'ja-JP', 
+          name: 'ja-JP-Standard-B'  // 元々使用していたモデルを指定
+        },
         audioConfig: { 
           audioEncoding: 'MP3',
           speakingRate: 1.15  // 読み上げ速度の最適化
