@@ -120,6 +120,9 @@ async function handleAI(msg){
   try{
     statusEl.textContent='💭 回答生成中…';
     
+    // 中間メッセージを表示
+    showInterimMessage("お調べいたしますので、しばらくお待ちください。");
+    
     console.log("AIリクエスト送信開始:", msg);
     const ai = await fetch('/.netlify/functions/ai', {
       method: 'POST',
@@ -136,6 +139,9 @@ async function handleAI(msg){
     localStorage.setItem('kindergarten_session_id', currentSessionId);
     conversationStage = ai.stage;
 
+    // 中間メッセージを非表示
+    hideInterimMessage();
+    
     setTimeout(() => {replyEl.textContent = `サポートからの回答: ${ai.reply}`;}, 500);
 
     statusEl.textContent = '🔊 回答生成中…';
@@ -171,6 +177,30 @@ async function handleAI(msg){
   } finally {
     vadActive = true;
     statusEl.textContent = '🎧 次の発話を検知します';
+  }
+}
+
+// 中間メッセージを表示する関数
+function showInterimMessage(text) {
+  // 既存の中間メッセージ要素があれば再利用、なければ作成
+  let interimEl = document.getElementById('interim-message');
+  if (!interimEl) {
+    interimEl = document.createElement('div');
+    interimEl.id = 'interim-message';
+    interimEl.className = 'message ai-message interim';
+    // replyElの前に挿入
+    replyEl.parentNode.insertBefore(interimEl, replyEl);
+  }
+  
+  interimEl.textContent = text;
+  interimEl.style.display = 'block';
+}
+
+// 中間メッセージを非表示にする関数
+function hideInterimMessage() {
+  const interimEl = document.getElementById('interim-message');
+  if (interimEl) {
+    interimEl.style.display = 'none';
   }
 }
 
