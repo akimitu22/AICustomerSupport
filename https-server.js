@@ -90,11 +90,15 @@ function analyzeStage(msg, stage) {
 
 function systemPrompt() {
   return `ホザナ幼稚園の入園コンシェルジュです。園に関する質問に250文字程度で親切・丁寧に回答してください。
+
+以下のQ&A情報を必ず参考にしてください。しかし、単に情報をそのまま繰り返すのではなく、自然な対話を心がけて回答してください。
+
 ※見学を希望される方には「このページ上部の見学予約ボタンからお申し込みください」と案内してください。
 ※電話番号は絶対に読み上げないでください。
 ※お問い合わせには「ホームページのお問い合わせフォームからどうぞ」と案内してください。
 ※「電話でのお問い合わせ」という言葉や電話番号は絶対に使わないでください。
-不明点は「園へお問い合わせください」と案内してください。また、絶対に「入園」を「入院」と誤変換して理解しないでください。お問い合わせに「入園」は絶対にありえません。それは100％「入園」の意味です。`;
+
+不明点は「園へお問い合わせください」と案内してください。また、絶対に「入園」を「入院」と誤変換して理解しないでください。お問い合わせに「入院」は絶対にありえません。それは100％「入園」の意味です。`;
 }
 
 app.post('/ai', async (req, res) => {
@@ -120,7 +124,7 @@ app.post('/ai', async (req, res) => {
             role: 'system',
             content: `${systemPrompt()}
 
-以下はホザナ幼稚園の公式Q&Aです：
+以下はホザナ幼稚園の公式Q&Aです。これらの情報を元に、自然な会話を心がけて回答してください。同じ質問に対しても少し表現を変えるなど、バリエーションを持たせてください：
 
 ----- Q&A -----
 ${qaContext}
@@ -129,7 +133,7 @@ ${qaContext}
           ...sess.history.slice(-5)
         ],
         max_tokens: 400,
-        temperature: 0.5
+        temperature: 0.7  // 多様な応答のために少し上げる
       },
       { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
     );
@@ -168,23 +172,71 @@ async function synthesize(text) {
 
   const ssmlText = `<speak>${convertMarkdownToSSML(fixed)}</speak>`;
 
-  const { data } = await axios.post(
-    `https://texttospeech.googleapis.com/v1/text:synthesize?key=${process.env.GOOGLE_API_KEY}`,
-    {
-      input: { ssml: ssmlText },
-      voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
-      audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
-    }
-  );
+  try {
+    const { data } = await axios.post(
+      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${process.env.GOOGLE_API_KEY}`,
+      {
+        input: { ssml: ssmlText },
+        voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
+        audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
+      }
+    );
 
-  return `data:audio/mpeg;base64,${data.audioContent}`;
+    return `data:audio/mpeg;base64,${data.audioContent}`;
+  } catch (error) {
+    console.error('Google TTS API error:', error.response?.data || error.message);
+    // フォールバック：Standard音声に切り替え
+    try {
+      const { data } = await axios.post(
+        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${process.env.GOOGLE_API_KEY}`,
+        {
+          input: { ssml: ssmlText },
+          voice: { languageCode: 'ja-JP', name: 'ja-JP-Standard-B' },
+          audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
+        }
+      );
+      return `data:audio/mpeg;base64,${data.audioContent}`;
+    } catch (fallbackError) {
+      // それでも失敗したら、モデル指定なしで試す
+      const { data } = await axios.post(
+        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${process.env.GOOGLE_API_KEY}`,
+        {
+          input: { ssml: ssmlText },
+          voice: { languageCode: 'ja-JP' },
+          audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
+        }
+      );
+      return `data:audio/mpeg;base64,${data.audioContent}`;
+    }
+  }
 }
 
 app.post('/tts', async (req, res) => {
   try {
-    const { text } = req.body;
-    if (!text?.trim()) return res.status(400).json({ error: 'empty' });
-    const audioUrl = await synthesize(text);
+    const { text, ssml } = req.body;
+    
+    if (!text?.trim() && !ssml?.trim()) {
+      return res.status(400).json({ error: 'empty' });
+    }
+    
+    let audioUrl;
+    if (ssml && ssml.trim()) {
+      // SSMLが提供されている場合は直接使用
+      const finalSSML = ssml.includes('<speak>') ? ssml : `<speak>${ssml}</speak>`;
+      const { data } = await axios.post(
+        `https://texttospeech.googleapis.com/v1/text:synthesize?key=${process.env.GOOGLE_API_KEY}`,
+        {
+          input: { ssml: finalSSML },
+          voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
+          audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
+        }
+      );
+      audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
+    } else {
+      // テキストからSSML生成
+      audioUrl = await synthesize(text);
+    }
+    
     res.json({ audioUrl });
   } catch (e) {
     console.error('TTS error:', e.response?.data || e.message);
@@ -192,4 +244,4 @@ app.post('/tts', async (req, res) => {
   }
 });
 
-module.exports = app;
+export default app;
