@@ -3,7 +3,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
-// JSONファイルから直接Q&A情報を読み込み
+// JSONファイルから直接QandA情報を読み込み
 const kindergartenQA = require('./QandA.json').kindergartenQA;
 
 exports.handler = async function(event, context) {
@@ -83,7 +83,7 @@ exports.handler = async function(event, context) {
 
     const sid = sessionId || `s_${Date.now()}`;
     
-    // Q&A情報をコンテキストに変換
+    // QandA情報をコンテキストに変換
     const qaContext = kindergartenQA
       .map(q => `Q: ${q.question}\nA: ${q.answer}`)
       .join('\n');
@@ -97,11 +97,11 @@ exports.handler = async function(event, context) {
           messages: [
             {
               role: 'system',
-              content: `ホザナ幼稚園の入園コンシェルジュです。園に関する質問に250文字程度で親切・丁寧に回答してください。
+              content: `ホザナ幼稚園の入園コンシェルジュです。園に関する質問に200文字程度で親切・丁寧に回答してください。
               
-以下のQ&A情報を必ず参考にして、正確な回答を提供してください。特に入園料、給食費、保育内容などの具体的な質問には、必ずこの情報から回答してください：
+以下のQandA情報を必ず参考にして、正確な回答を提供してください。特に入園料、給食費、保育内容などの具体的な質問には、必ずこの情報から回答してください：
 
------ Q&A 情報 -----
+----- QandA 情報 -----
 ${qaContext}
 ---------------------
 
