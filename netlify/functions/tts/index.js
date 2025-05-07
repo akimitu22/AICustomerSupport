@@ -16,10 +16,10 @@ function optimizeJapaneseReading(text) {
     .replace(/副園長/g, 'ふくえんちょう')
     .replace(/入園/g, 'にゅうえん')
     .replace(/園長/g, 'えんちょう')
-    .replace(/幼稚園/g, 'ようちえん')
     .replace(/園庭/g, 'えんてい')
     .replace(/園児/g, 'えんじ')
     .replace(/他園/g, 'たえん')
+    .replace(/卒園/g, 'そつえん')
     .replace(/園/g, 'えん')
     .replace(/大坪園子/g, 'おおつぼそのこ');
 }
