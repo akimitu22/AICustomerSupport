@@ -225,109 +225,6 @@
     }
   </script>
 
-  <!-- client.js 読み込み前の script タグ内に追加 -->
-  <script>
-    // グローバル変数にハイブリッド音声認識を保持
-    // window.hybridRecognition = null;
-    
-    // Tiny Segmenterの読み込み（形態素解析用）
-    /*
-    document.addEventListener('DOMContentLoaded', function() {
-      const tinySegmenterScript = document.createElement('script');
-      tinySegmenterScript.src = 'https://cdn.jsdelivr.net/npm/tiny-segmenter@0.2.0/tiny_segmenter.min.js';
-      tinySegmenterScript.onload = function() {
-        console.log('TinySegmenter読み込み完了');
-      };
-      document.head.appendChild(tinySegmenterScript);
-    });
-    */
-    
-    // client.js読み込み時にハイブリッド音声認識を初期化する関数
-    /*
-    function initHybridRecognition() {
-      if (window.HybridVoiceRecognition && !window.hybridRecognition) {
-        window.hybridRecognition = new HybridVoiceRecognition({
-          language: 'ja-JP',
-          whisperApiEndpoint: './.netlify/functions/stt',
-          debug: true
-        });
-        console.log('幼稚園特化型ハイブリッド音声認識を初期化しました');
-      }
-    }
-    */
-    
-    // DOMContentLoaded イベントで初期化も行う
-    /*
-    document.addEventListener('DOMContentLoaded', function() {
-      // スクリプトがすでに読み込まれている場合に初期化
-      if (window.HybridVoiceRecognition) {
-        initHybridRecognition();
-      }
-    });
-    */
-    
-    // client.jsのロード完了を監視するためのカスタムイベント
-    /*
-    document.addEventListener('clientLoaded', function() {
-      initHybridRecognition();
-    });
-    */
-    
-    // 元のVAD関数を保存
-    const originalStartVAD = window.startVAD;
-    
-    // 新しいVAD関数を設定
-    /*
-    window.startVAD = function() {
-      // ハイブリッド認識の開始
-      if (window.hybridRecognition) {
-        window.hybridRecognition.startListening(
-          // 中間結果（認識中）
-          function(text) {
-            const recognizedElement = document.getElementById('recognized');
-            if (recognizedElement) {
-              recognizedElement.innerHTML = `<em>(認識中): ${text}</em>`;
-            }
-          },
-          // 最終結果
-          function(result) {
-            const recognizedElement = document.getElementById('recognized');
-            if (recognizedElement) {
-              recognizedElement.innerHTML = `<strong>あなた:</strong> ${result.text} <small>(${result.engine})</small>`;
-            }
-            
-            // client.jsの応答関数を呼び出し
-            if (window.processVoiceInput) {
-              window.processVoiceInput(result.text);
-            }
-          },
-          // エラー
-          function(error) {
-            console.error('認識エラー:', error);
-            const statusElement = document.getElementById('status');
-            if (statusElement) {
-              if (error.error === 'mic-permission') {
-                // マイク許可エラーの特別処理
-                statusElement.innerHTML = `🔴 マイクの使用許可が必要です。設定を確認してください。`;
-              } else {
-                statusElement.innerHTML = `🔴 エラー: ${error.error || 'Unknown'} (${error.engine || 'system'})`;
-              }
-            }
-          }
-        );
-      }
-      
-      // 元のstartVAD関数も呼び出す
-      if (originalStartVAD) {
-        window.voiceSupportActive = true;
-        return originalStartVAD();
-      }
-      
-      return Promise.resolve();
-    };
-    */
-  </script>
-
   <!-- client.jsの読み込み部分を修正 -->
   <script>
     // 音声サポート切り替え
@@ -383,21 +280,6 @@
             }
           }
           
-          // ハイブリッド認識も停止
-          /*
-          if (window.hybridRecognition) {
-            try {
-              window.hybridRecognition.stopListening();
-              // リソース解放も試みる
-              if (typeof window.hybridRecognition.dispose === 'function') {
-                window.hybridRecognition.dispose();
-              }
-            } catch (e) {
-              console.warn('ハイブリッド認識停止エラー:', e);
-            }
-          }
-          */
-          
           // ステータス表示をリセット
           const statusElement = document.getElementById('status');
           if (statusElement) {
@@ -415,15 +297,12 @@
           if (!window.clientScriptLoaded) {
             const script = document.createElement('script');
             script.src = 'client.js';
-            script.type = 'module';
-            
+
             // スクリプト読み込み完了イベントを追加
             script.onload = function() {
               console.log('client.js読み込み完了');
               // カスタムイベントを発行
               document.dispatchEvent(new Event('clientLoaded'));
-              // ハイブリッド認識の初期化
-              // initHybridRecognition();
             };
             
             document.body.appendChild(script);
@@ -457,5 +336,5 @@
       return window.originalStartVAD ? window.originalStartVAD() : Promise.reject('関数が見つかりません');
     };
   </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'93c39c7aeb26bd48',t:'MTc0NjY1MTI1My4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
