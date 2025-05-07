@@ -2,14 +2,11 @@
    client.js  ―  音声録音・GPT連携・TTS再生
    ───────────────────────────────────── */
 
-// デバッグヘルパー関数
+// デバッグヘルパー関数（エラー修正版）
 const safeLog = (label, data) => {
   try {
-    // 大きなデータは省略処理
-    if (typeof data === 'string' && data.length > 500) {
-      console.log(`${label}:`, data.substring(0, 500) + `... [省略:${data.length - 500}文字]`);
-      return;
-    }
+    // コンソールが利用可能か確認
+    if (typeof console === 'undefined' || !console.log) return;
     
     // undefined/nullの安全な表示
     if (data === undefined) {
@@ -22,9 +19,21 @@ const safeLog = (label, data) => {
       return;
     }
     
+    // 大きなデータは省略処理
+    if (typeof data === 'string' && data.length > 500) {
+      console.log(`${label}:`, data.substring(0, 500) + `... [省略:${data.length - 500}文字]`);
+      return;
+    }
+
+    // 通常のログ出力
     console.log(`${label}:`, data);
   } catch (e) {
-    console.error(`ログ出力エラー(${label}):`, e);
+    // ログ出力自体が失敗した場合のフォールバック
+    try {
+      console.error(`ログ出力エラー(${label}):`, e);
+    } catch {
+      // 何もできない場合は黙って続行
+    }
   }
 };
 
@@ -50,23 +59,29 @@ startVAD().catch(err=>{
 
 async function startVAD(){
   statusEl.textContent='🎤 マイク準備中…';
-  micStream = await navigator.mediaDevices.getUserMedia({
-    audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}
-  });
-  audioCtx   = new (window.AudioContext||window.webkitAudioContext)();
-  const src  = audioCtx.createMediaStreamSource(micStream);
-  const gain = audioCtx.createGain(); gain.gain.value=1.5;
-  processor  = audioCtx.createScriptProcessor(2048,1,1);
-  processor.onaudioprocess = vadMonitor;
-  src.connect(gain); gain.connect(processor); processor.connect(audioCtx.destination);
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}
+    });
+    
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(micStream);
+    const gain = audioCtx.createGain(); gain.gain.value=1.5;
+    processor = audioCtx.createScriptProcessor(2048,1,1);
+    processor.onaudioprocess = vadMonitor;
+    src.connect(gain); gain.connect(processor); processor.connect(audioCtx.destination);
 
-  mediaRecorder = new MediaRecorder(micStream,{mimeType:'audio/webm;codecs=opus'});
-  mediaRecorder.ondataavailable = e=>recordingChunks.push(e.data);
-  mediaRecorder.onstop = handleRecordingStop;
+    mediaRecorder = new MediaRecorder(micStream,{mimeType:'audio/webm;codecs=opus'});
+    mediaRecorder.ondataavailable = e=>recordingChunks.push(e.data);
+    mediaRecorder.onstop = handleRecordingStop;
 
-  statusEl.textContent='🎧 どうぞお話しください…';
-  vadActive=true;
-  createQuickLinks();
+    statusEl.textContent='🎧 どうぞお話しください…';
+    vadActive=true;
+    createQuickLinks();
+  } catch (err) {
+    console.error('マイク初期化エラー:', err);
+    throw err;
+  }
 }
 
 /* ───────── 発話検知 ───────── */
@@ -155,34 +170,36 @@ async function handleRecordingStop() {
         throw new Error("STTレスポンスが空です");
       }
       
+      // エラーチェック
+      if (sttResult.error) {
+        safeLog("STTエラーレスポンス", sttResult.error);
+        throw new Error(`音声認識エラー: ${sttResult.error}`);
+      }
+      
       // text プロパティの検証 (堅牢性向上)
       let recognizedText;
       
       // ケース1: 新しい構造 - { text: "...", originalText: "...", success: true }
-      if (sttResult.text && typeof sttResult.text === 'string') {
+      if (sttResult.text && typeof sttResult.text === 'string' && sttResult.text.trim()) {
         recognizedText = sttResult.text;
         safeLog("認識テキスト(直接プロパティ)", recognizedText);
       }
       // ケース2: 古い構造 - { stt: { text: "..." }, ... }
-      else if (sttResult.stt && sttResult.stt.text && typeof sttResult.stt.text === 'string') {
+      else if (sttResult.stt && sttResult.stt.text && typeof sttResult.stt.text === 'string' && sttResult.stt.text.trim()) {
         recognizedText = sttResult.stt.text;
         safeLog("認識テキスト(sttプロパティ経由)", recognizedText);
       }
-      // ケース3: その他の構造 - エラー
+      // ケース3: その他の構造 または 空テキスト - エラー
       else {
         safeLog("無効なSTTレスポンス構造", {
           hasText: !!sttResult.text,
           textType: typeof sttResult.text,
+          textEmpty: sttResult.text === '',
           hasStt: !!sttResult.stt,
           sttType: typeof sttResult.stt,
           allKeys: Object.keys(sttResult)
         });
         throw new Error("STTレスポンスに有効なテキストが含まれていません");
-      }
-      
-      // 空文字列チェック
-      if (!recognizedText.trim()) {
-        throw new Error("認識されたテキストが空です");
       }
       
       // テキスト処理と表示
@@ -360,11 +377,11 @@ function playAudio(url) {
           safeLog("既存音声停止エラー", pauseError);
         }
         window.currentAudio = null;
+        isPlayingAudio = false; // フラグをリセット
       }
       
-      // 新しい音声オブジェクト作成
-      window.currentAudio = new Audio(url);
-      safeLog("Audioオブジェクト作成完了");
+      // 新しい音声オブジェクト作成（src設定前にイベントハンドラを設定）
+      window.currentAudio = new Audio();
       
       // エラーハンドリング
       window.currentAudio.onerror = (e) => {
@@ -382,15 +399,23 @@ function playAudio(url) {
         safeLog("音声再生準備完了");
         isPlayingAudio = true;
         
-        const playPromise = window.currentAudio.play();
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => safeLog("音声再生開始"))
-            .catch(err => {
-              safeLog("音声再生Promise失敗", err);
-              isPlayingAudio = false;
-              reject(err);
-            });
+        try {
+          const playPromise = window.currentAudio.play();
+          if (playPromise !== undefined) {
+            playPromise
+              .then(() => safeLog("音声再生開始"))
+              .catch(err => {
+                safeLog("音声再生Promise失敗", err);
+                isPlayingAudio = false;
+                reject(err);
+              });
+          } else {
+            safeLog("音声再生開始 (Promiseなし)");
+          }
+        } catch (playError) {
+          safeLog("音声再生直接エラー", playError);
+          isPlayingAudio = false;
+          reject(playError);
         }
       };
       
@@ -400,6 +425,12 @@ function playAudio(url) {
         isPlayingAudio = false;
         resolve();
       };
+      
+      // URL設定（これでロード開始）
+      window.currentAudio.src = url;
+      
+      // 明示的にロード開始
+      window.currentAudio.load();
       
       // タイムアウト設定（30秒）
       setTimeout(() => {
