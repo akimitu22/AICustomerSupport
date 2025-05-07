@@ -314,7 +314,7 @@ async function handleAI(msg){
       
       try {
         await playAudio(ttsResponse.audioUrl);
-        safeLog("音声再生完了");
+        safeLog("音声再生完了", "再生完了");
       } catch (playError) {
         safeLog("音声再生エラー", playError);
         // 再生エラーは致命的ではないため、処理を続行
@@ -362,8 +362,6 @@ function hideInterimMessage() {
 }
 
 /* ───────── 音声再生 - エラーハンドリング強化 ───────── */
-
-/* playAudio 関数の修正部分 */
 function playAudio(url) {
   return new Promise((resolve, reject) => {
     try {
@@ -371,7 +369,7 @@ function playAudio(url) {
       
       // 既存の音声停止
       if (isPlayingAudio && window.currentAudio) {
-        safeLog("既存の音声を停止");
+        safeLog("既存の音声を停止", "停止処理");
         try {
           window.currentAudio.pause();
           window.currentAudio.src = ""; // メモリ解放のため
@@ -398,21 +396,21 @@ function playAudio(url) {
       
       // 再生準備完了イベント
       window.currentAudio.oncanplaythrough = () => {
-        safeLog("音声再生準備完了");
+        safeLog("音声再生準備完了", "準備完了");  // 明示的な値を渡す
         isPlayingAudio = true;
         
         try {
           const playPromise = window.currentAudio.play();
           if (playPromise !== undefined) {
             playPromise
-              .then(() => safeLog("音声再生開始"))
+              .then(() => safeLog("音声再生開始", "再生中"))  // 明示的な値を渡す
               .catch(err => {
                 safeLog("音声再生Promise失敗", err);
                 isPlayingAudio = false;
                 reject(err);
               });
           } else {
-            safeLog("音声再生開始 (Promiseなし)");
+            safeLog("音声再生開始 (Promiseなし)", "再生中");
           }
         } catch (playError) {
           safeLog("音声再生直接エラー", playError);
@@ -423,7 +421,7 @@ function playAudio(url) {
       
       // 再生終了イベント
       window.currentAudio.onended = () => {
-        safeLog("音声再生終了");
+        safeLog("音声再生終了", "再生終了");  // 明示的な値を渡す
         isPlayingAudio = false;
         resolve();
       };
@@ -434,10 +432,10 @@ function playAudio(url) {
       // 明示的にロード開始
       window.currentAudio.load();
       
-      // タイムアウト設定（60秒に延長）
+      // タイムアウト設定（120秒に延長）
       setTimeout(() => {
         if (isPlayingAudio) {
-          safeLog("音声再生タイムアウト");
+          safeLog("音声再生タイムアウト", "タイムアウト発生");  // 明示的な値を渡す
           try {
             window.currentAudio.pause();
           } catch (e) {
@@ -446,7 +444,7 @@ function playAudio(url) {
           isPlayingAudio = false;
           resolve(); // 強制的に完了扱い
         }
-      }, 60000); // 60秒に延長
+      }, 120000); // 120秒に延長
       
     } catch (e) {
       safeLog("playAudio関数内エラー", e);
