@@ -870,22 +870,26 @@ class HybridVoiceRecognition {
       });
     }
     
-    // 「円」→「園」の特殊変換 (前後の文脈を考慮)
+// 「円」→「園」の特殊変換 (前後の文脈を考慮)
     // 金額として明らかな場合は変換しない
     corrected = corrected.replace(/(\d+)([万千百十]?)円/g, '$1$2円'); // 数字+円はそのまま
     // 数字以外+円は園に変換（より厳密な条件）
     corrected = corrected.replace(/([^\d０-９万千百十])円/g, '$1園');
-    
-    // 「保育園」が「保育員」になる誤りを修正
-    corrected = corrected.replace(/保育員/g, '保育園');
-    
+        
     // 「預かり保育」が「扱い保育」になる誤りを修正
     corrected = corrected.replace(/扱い保育/g, '預かり保育');
     
     // 「制服」が「征服」「正服」になる誤りを修正
     corrected = corrected.replace(/征服|正服/g, '制服');
     
+    // 幼稚園名の誤認識を修正
+    corrected = corrected.replace(/児玉幼稚園|小棚幼稚園/g, 'ホザナ幼稚園');
+    
+    // 「預かり」が「扱い」になる誤りを修正（単語単位での置換）
+    corrected = corrected.replace(/\b扱い(保育|時間)\b/g, '預かり$1');
+    
     // 保育園、幼稚園などの語彙が欠けている場合に補完
+    // ホザナ幼稚園の参照が確実になるよう修正
     if (/園に(つい|関し|ある|入り)/i.test(corrected) && !/(幼稚園|保育園|こども園)/i.test(corrected)) {
       corrected = corrected.replace(/園に/i, 'ホザナ幼稚園に');
     }
