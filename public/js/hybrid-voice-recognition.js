@@ -879,8 +879,8 @@ class HybridVoiceRecognition {
     // 「保育園」が「保育員」になる誤りを修正
     corrected = corrected.replace(/保育員/g, '保育園');
     
-    // 「預かり保育」が「預かり保険」になる誤りを修正
-    corrected = corrected.replace(/預かり保険/g, '預かり保育');
+    // 「預かり保育」が「扱い保育」になる誤りを修正
+    corrected = corrected.replace(/扱い保育/g, '預かり保育');
     
     // 「制服」が「征服」「正服」になる誤りを修正
     corrected = corrected.replace(/征服|正服/g, '制服');
