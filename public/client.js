@@ -361,7 +361,7 @@ function hideInterimMessage() {
   if (interimEl) interimEl.style.display = 'none';
 }
 
-/* ───────── 音声再生 - エラーハンドリング強化 ───────── */
+/* ───────── 音声再生 - 進捗監視機能追加 ───────── */
 function playAudio(url) {
   return new Promise((resolve, reject) => {
     try {
@@ -372,39 +372,83 @@ function playAudio(url) {
         safeLog("既存の音声を停止", "停止処理");
         try {
           window.currentAudio.pause();
-          window.currentAudio.src = ""; // メモリ解放のため
+          window.currentAudio.src = ""; 
         } catch (pauseError) {
           safeLog("既存音声停止エラー", pauseError);
         }
         window.currentAudio = null;
-        isPlayingAudio = false; // フラグをリセット
+        isPlayingAudio = false;
       }
       
-      // 新しい音声オブジェクト作成（src設定前にイベントハンドラを設定）
+      // 新しい音声オブジェクト作成
       window.currentAudio = new Audio();
+      
+      // 進捗監視のための変数
+      let lastPosition = 0;
+      let stagnantCount = 0;
+      let progressTimer = null;
+      
+      // 再生進捗を監視する関数
+      function startProgressMonitoring() {
+        progressTimer = setInterval(() => {
+          if (!window.currentAudio || !isPlayingAudio) return;
+          
+          try {
+            // 現在の再生位置を取得
+            const currentPosition = window.currentAudio.currentTime;
+            
+            // 位置が変わっていない場合
+            if (currentPosition === lastPosition) {
+              stagnantCount++;
+              safeLog("再生位置が変わっていません", { 
+                position: currentPosition, 
+                count: stagnantCount 
+              });
+              
+              // 3秒間位置が変わらなければ停止とみなす
+              if (stagnantCount >= 3) {
+                safeLog("再生停止を検出", "自動完了");
+                clearInterval(progressTimer);
+                isPlayingAudio = false;
+                resolve();
+              }
+            } else {
+              // 位置が変わっていればカウンターリセット
+              stagnantCount = 0;
+              lastPosition = currentPosition;
+              safeLog("再生進行中", { position: currentPosition });
+            }
+          } catch (e) {
+            safeLog("進捗監視エラー", e);
+          }
+        }, 1000);
+      }
       
       // エラーハンドリング
       window.currentAudio.onerror = (e) => {
-        const errorInfo = {
+        if (progressTimer) clearInterval(progressTimer);
+        safeLog("音声読み込みエラー", {
           code: window.currentAudio.error ? window.currentAudio.error.code : 'unknown',
           message: window.currentAudio.error ? window.currentAudio.error.message : 'unknown'
-        };
-        safeLog("音声読み込みエラー", errorInfo);
+        });
         isPlayingAudio = false;
-        reject(new Error(`音声の読み込みに失敗しました: ${JSON.stringify(errorInfo)}`));
+        reject(new Error("音声の読み込みに失敗しました"));
       };
       
       // 再生準備完了イベント
       window.currentAudio.oncanplaythrough = () => {
-        safeLog("音声再生準備完了", "準備完了");  // 明示的な値を渡す
+        safeLog("音声再生準備完了", "準備完了");
         isPlayingAudio = true;
         
         try {
           const playPromise = window.currentAudio.play();
+          startProgressMonitoring(); // 進捗監視を開始
+          
           if (playPromise !== undefined) {
             playPromise
-              .then(() => safeLog("音声再生開始", "再生中"))  // 明示的な値を渡す
+              .then(() => safeLog("音声再生開始", "再生中"))
               .catch(err => {
+                if (progressTimer) clearInterval(progressTimer);
                 safeLog("音声再生Promise失敗", err);
                 isPlayingAudio = false;
                 reject(err);
@@ -413,6 +457,7 @@ function playAudio(url) {
             safeLog("音声再生開始 (Promiseなし)", "再生中");
           }
         } catch (playError) {
+          if (progressTimer) clearInterval(progressTimer);
           safeLog("音声再生直接エラー", playError);
           isPlayingAudio = false;
           reject(playError);
@@ -421,30 +466,31 @@ function playAudio(url) {
       
       // 再生終了イベント
       window.currentAudio.onended = () => {
-        safeLog("音声再生終了", "再生終了");  // 明示的な値を渡す
+        if (progressTimer) clearInterval(progressTimer);
+        safeLog("音声再生終了", "正常終了");
         isPlayingAudio = false;
         resolve();
       };
       
-      // URL設定（これでロード開始）
+      // URL設定とロード開始
       window.currentAudio.src = url;
-      
-      // 明示的にロード開始
       window.currentAudio.load();
       
-      // タイムアウト設定（120秒に延長）
+      // バックアップタイムアウト (180秒 = 3分)
+      // 通常の回答でも十分な時間
       setTimeout(() => {
         if (isPlayingAudio) {
-          safeLog("音声再生タイムアウト", "タイムアウト発生");  // 明示的な値を渡す
+          if (progressTimer) clearInterval(progressTimer);
+          safeLog("音声再生バックアップタイムアウト", "3分経過");
           try {
             window.currentAudio.pause();
           } catch (e) {
             safeLog("タイムアウト時の停止エラー", e);
           }
           isPlayingAudio = false;
-          resolve(); // 強制的に完了扱い
+          resolve();
         }
-      }, 120000); // 120秒に延長
+      }, 180000); // 3分
       
     } catch (e) {
       safeLog("playAudio関数内エラー", e);
