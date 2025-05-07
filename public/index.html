@@ -195,6 +195,18 @@
     お気軽にご質問ください。
   </footer>
 
+  <!-- Tiny Segmenterの読み込み（形態素解析用） -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const tinySegmenterScript = document.createElement('script');
+      tinySegmenterScript.src = 'https://cdn.jsdelivr.net/npm/tiny-segmenter@0.2.0/tiny_segmenter.min.js';
+      tinySegmenterScript.onload = function() {
+        console.log('TinySegmenter読み込み完了');
+      };
+      document.head.appendChild(tinySegmenterScript);
+    });
+  </script>
+
   <!-- 外部リンク処理のためのスクリプト -->
   <script>
     // 音声機能をトリガーせずにリンクを開く
@@ -226,20 +238,10 @@
     }
   </script>
 
-  <!-- client.js 読み込み前の script タグ内に追加 -->
+  <!-- ハイブリッド音声認識の初期化 -->
   <script>
     // グローバル変数にハイブリッド音声認識を保持
     window.hybridRecognition = null;
-    
-    // Tiny Segmenterの読み込み（形態素解析用）
-    document.addEventListener('DOMContentLoaded', function() {
-      const tinySegmenterScript = document.createElement('script');
-      tinySegmenterScript.src = 'https://cdn.jsdelivr.net/npm/tiny-segmenter@0.2.0/tiny_segmenter.min.js';
-      tinySegmenterScript.onload = function() {
-        console.log('TinySegmenter読み込み完了');
-      };
-      document.head.appendChild(tinySegmenterScript);
-    });
     
     // client.js読み込み時にハイブリッド音声認識を初期化する関数
     function initHybridRecognition() {
@@ -253,6 +255,11 @@
       }
     }
     
+    // client.jsのロード完了を監視するためのカスタムイベント
+    document.addEventListener('clientLoaded', function() {
+      initHybridRecognition();
+    });
+    
     // DOMContentLoaded イベントで初期化も行う
     document.addEventListener('DOMContentLoaded', function() {
       // スクリプトがすでに読み込まれている場合に初期化
@@ -260,14 +267,12 @@
         initHybridRecognition();
       }
     });
-    
-    // client.jsのロード完了を監視するためのカスタムイベント
-    document.addEventListener('clientLoaded', function() {
-      initHybridRecognition();
-    });
-    
+  </script>
+
+  <!-- VAD関数の拡張 -->
+  <script>
     // 元のVAD関数を保存
-    const originalStartVAD = window.startVAD;
+    window.originalStartVAD = window.startVAD;
     
     // 新しいVAD関数を設定
     window.startVAD = function() {
@@ -310,16 +315,16 @@
       }
       
       // 元のstartVAD関数も呼び出す
-      if (originalStartVAD) {
+      if (window.originalStartVAD) {
         window.voiceSupportActive = true;
-        return originalStartVAD();
+        return window.originalStartVAD();
       }
       
       return Promise.resolve();
     };
   </script>
 
-  <!-- client.jsの読み込み部分を修正 -->
+  <!-- 音声サポート切り替え -->
   <script>
     // 音声サポート切り替え
     document.addEventListener('DOMContentLoaded', function() {
@@ -395,13 +400,6 @@
   <script>
     // グローバル変数を追加して音声サポートの状態を管理
     window.voiceSupportActive = false;
-    
-    // オリジナルのstartVAD関数をオーバーライド
-    window.originalStartVAD = window.startVAD;
-    window.startVAD = function() {
-      window.voiceSupportActive = true;
-      return window.originalStartVAD ? window.originalStartVAD() : Promise.reject('関数が見つかりません');
-    };
   </script>
 </body>
 </html>
