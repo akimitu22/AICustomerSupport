@@ -195,18 +195,6 @@
     お気軽にご質問ください。
   </footer>
 
-  <!-- Tiny Segmenterの読み込み（形態素解析用） -->
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      const tinySegmenterScript = document.createElement('script');
-      tinySegmenterScript.src = 'https://cdn.jsdelivr.net/npm/tiny-segmenter@0.2.0/tiny_segmenter.min.js';
-      tinySegmenterScript.onload = function() {
-        console.log('TinySegmenter読み込み完了');
-      };
-      document.head.appendChild(tinySegmenterScript);
-    });
-  </script>
-
   <!-- 外部リンク処理のためのスクリプト -->
   <script>
     // 音声機能をトリガーせずにリンクを開く
@@ -238,10 +226,20 @@
     }
   </script>
 
-  <!-- ハイブリッド音声認識の初期化 -->
+  <!-- client.js 読み込み前の script タグ内に追加 -->
   <script>
     // グローバル変数にハイブリッド音声認識を保持
     window.hybridRecognition = null;
+    
+    // Tiny Segmenterの読み込み（形態素解析用）
+    document.addEventListener('DOMContentLoaded', function() {
+      const tinySegmenterScript = document.createElement('script');
+      tinySegmenterScript.src = 'https://cdn.jsdelivr.net/npm/tiny-segmenter@0.2.0/tiny_segmenter.min.js';
+      tinySegmenterScript.onload = function() {
+        console.log('TinySegmenter読み込み完了');
+      };
+      document.head.appendChild(tinySegmenterScript);
+    });
     
     // client.js読み込み時にハイブリッド音声認識を初期化する関数
     function initHybridRecognition() {
@@ -255,11 +253,6 @@
       }
     }
     
-    // client.jsのロード完了を監視するためのカスタムイベント
-    document.addEventListener('clientLoaded', function() {
-      initHybridRecognition();
-    });
-    
     // DOMContentLoaded イベントで初期化も行う
     document.addEventListener('DOMContentLoaded', function() {
       // スクリプトがすでに読み込まれている場合に初期化
@@ -267,12 +260,14 @@
         initHybridRecognition();
       }
     });
-  </script>
-
-  <!-- VAD関数の拡張 -->
-  <script>
+    
+    // client.jsのロード完了を監視するためのカスタムイベント
+    document.addEventListener('clientLoaded', function() {
+      initHybridRecognition();
+    });
+    
     // 元のVAD関数を保存
-    window.originalStartVAD = window.startVAD;
+    const originalStartVAD = window.startVAD;
     
     // 新しいVAD関数を設定
     window.startVAD = function() {
@@ -315,16 +310,16 @@
       }
       
       // 元のstartVAD関数も呼び出す
-      if (window.originalStartVAD) {
+      if (originalStartVAD) {
         window.voiceSupportActive = true;
-        return window.originalStartVAD();
+        return originalStartVAD();
       }
       
       return Promise.resolve();
     };
   </script>
 
-  <!-- 音声サポート切り替え -->
+  <!-- client.jsの読み込み部分を修正 -->
   <script>
     // 音声サポート切り替え
     document.addEventListener('DOMContentLoaded', function() {
@@ -337,6 +332,7 @@
         
         // 音声サポートがオンの場合はオフにする
         if (isActive) {
+          // UIの更新
           voiceSupportContainer.classList.remove('active');
           toggleButton.textContent = '🎤';
           toggleHelpText.textContent = '🎤をクリックしてお話しください';
@@ -345,22 +341,59 @@
           stopAllAudio();
           
           // 音声サポートの完全停止
-          if (window.voiceSupportActive) {
-            window.voiceSupportActive = false;
-            // マイクを停止
-            if (window.micStream) {
+          window.voiceSupportActive = false;
+          
+          // マイクを停止 - nullチェックを追加
+          if (window.micStream) {
+            try {
               window.micStream.getTracks().forEach(track => track.stop());
+              window.micStream = null;
+            } catch (e) {
+              console.warn('マイク停止エラー:', e);
             }
-            // 音声コンテキストを停止
-            if (window.audioCtx && window.audioCtx.state !== 'closed') {
-              window.audioCtx.close();
-            }
-            // ハイブリッド認識も停止
-            if (window.hybridRecognition) {
-              window.hybridRecognition.stopListening();
-            }
-            console.log('音声サポートを完全に停止しました');
           }
+          
+          // 音声コンテキストを停止 - nullチェックを追加
+          if (window.audioCtx && window.audioCtx.state !== 'closed') {
+            try {
+              window.audioCtx.close();
+              window.audioCtx = null;
+            } catch (e) {
+              console.warn('音声コンテキスト停止エラー:', e);
+            }
+          }
+          
+          // Web Speech APIの認識を停止
+          if (window.recognition) {
+            try {
+              window.recognition.abort();
+              window.recognition.stop();
+              window.recognition = null;
+            } catch (e) {
+              console.warn('Web Speech API停止エラー:', e);
+            }
+          }
+          
+          // ハイブリッド認識も停止
+          if (window.hybridRecognition) {
+            try {
+              window.hybridRecognition.stopListening();
+              // リソース解放も試みる
+              if (typeof window.hybridRecognition.dispose === 'function') {
+                window.hybridRecognition.dispose();
+              }
+            } catch (e) {
+              console.warn('ハイブリッド認識停止エラー:', e);
+            }
+          }
+          
+          // ステータス表示をリセット
+          const statusElement = document.getElementById('status');
+          if (statusElement) {
+            statusElement.innerHTML = '🎤 音声認識は停止しています';
+          }
+          
+          console.log('音声サポートを完全に停止しました');
         } else {
           // 音声サポートをオンにする
           voiceSupportContainer.classList.add('active');
@@ -389,6 +422,11 @@
             window.voiceSupportActive = true;
             window.startVAD().catch(err => {
               console.error('マイク再開失敗:', err);
+              // 失敗した場合は音声サポートをオフに戻す
+              voiceSupportContainer.classList.remove('active');
+              toggleButton.textContent = '🎤';
+              toggleHelpText.textContent = '🎤をクリックしてお話しください';
+              window.voiceSupportActive = false;
             });
           }
         }
@@ -400,6 +438,13 @@
   <script>
     // グローバル変数を追加して音声サポートの状態を管理
     window.voiceSupportActive = false;
+    
+    // オリジナルのstartVAD関数をオーバーライド
+    window.originalStartVAD = window.startVAD;
+    window.startVAD = function() {
+      window.voiceSupportActive = true;
+      return window.originalStartVAD ? window.originalStartVAD() : Promise.reject('関数が見つかりません');
+    };
   </script>
 </body>
 </html>
