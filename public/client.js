@@ -362,6 +362,8 @@ function hideInterimMessage() {
 }
 
 /* ───────── 音声再生 - エラーハンドリング強化 ───────── */
+
+/* playAudio 関数の修正部分 */
 function playAudio(url) {
   return new Promise((resolve, reject) => {
     try {
@@ -432,7 +434,7 @@ function playAudio(url) {
       // 明示的にロード開始
       window.currentAudio.load();
       
-      // タイムアウト設定（30秒）
+      // タイムアウト設定（60秒に延長）
       setTimeout(() => {
         if (isPlayingAudio) {
           safeLog("音声再生タイムアウト");
@@ -444,7 +446,7 @@ function playAudio(url) {
           isPlayingAudio = false;
           resolve(); // 強制的に完了扱い
         }
-      }, 30000);
+      }, 60000); // 60秒に延長
       
     } catch (e) {
       safeLog("playAudio関数内エラー", e);
