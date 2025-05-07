@@ -115,7 +115,10 @@ exports.handler = async function(event, context) {
       contentType: requestBody.format || 'audio/webm'
     });
     formData.append('model', 'whisper-1');
-    formData.append('language', 'ja');
+    formData.append(
+      'prompt',
+      'これはホザナ幼稚園の入園案内に関する会話です。したがって、「願書」「預かり保育」「延長保育」「園長」「保育時間」「通園バス」「送迎バス」などの幼稚園関係の言葉が使われることは極めて多くありますが、「顔症」や「入院」などの医療関係の言葉が使われることは皆無ですので、例外なくすべて幼稚園関係の言葉と考えて変換してください。また、「幼い幼稚園」や「小棚幼稚園」というのは例外なく「ホザナ幼稚園」のことです。それゆえ、「○○幼稚園」と発音がされた場合は「ホザナ幼稚園」と理解してほぼ間違いありません。'
+     );
     
     // FormDataヘッダーの準備
     const fdHeaders = formData.getHeaders();
