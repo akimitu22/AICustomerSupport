@@ -114,6 +114,54 @@ async function callWhisperAPI(audioBuffer, format) {
   );
 }
 
+/**
+ * 一貫したレスポンス形式を生成するヘルパー関数
+ * @param {number} statusCode - HTTPステータスコード 
+ * @param {Object} headers - HTTPヘッダー
+ * @param {Object} data - レスポンスデータ 
+ * @param {string} [errorMessage] - エラーメッセージ（エラー時のみ）
+ * @returns {Object} - 形式化されたレスポンス
+ */
+function formatResponse(statusCode, headers, data = {}, errorMessage = null) {
+  // 一貫した形式のボディを作成
+  const responseBody = {
+    success: statusCode >= 200 && statusCode < 300
+  };
+  
+  // エラーの場合はエラー情報を追加
+  if (errorMessage) {
+    responseBody.error = errorMessage;
+    if (data.details) {
+      responseBody.details = data.details;
+    }
+  } 
+  // 成功の場合はデータをマージ
+  else {
+    Object.assign(responseBody, data);
+    
+    // text プロパティが必ず存在することを保証
+    if (!responseBody.text && responseBody.stt && responseBody.stt.text) {
+      responseBody.text = responseBody.stt.text;
+    } 
+    
+    // text が空文字列または未定義の場合の対応
+    if (!responseBody.text || responseBody.text.trim() === '') {
+      // 音声認識が空の場合はエラーとして処理
+      responseBody.success = false;
+      responseBody.error = "認識されたテキストが空です";
+      responseBody.text = "認識エラー"; // エラーメッセージをテキストにセット
+      // ステータスコードを変更
+      statusCode = 422; // Unprocessable Entity
+    }
+  }
+  
+  return {
+    statusCode,
+    headers,
+    body: JSON.stringify(responseBody)
+  };
+}
+
 // メインハンドラー関数
 exports.handler = async function(event, context) {
   const headers = {
@@ -130,11 +178,7 @@ exports.handler = async function(event, context) {
 
   // only POST
   if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      headers,
-      body: JSON.stringify({ error: 'Method Not Allowed' })
-    };
+    return formatResponse(405, headers, {}, 'Method Not Allowed');
   }
 
   console.log("STT start");
@@ -144,38 +188,22 @@ exports.handler = async function(event, context) {
     // リクエストの検証
     const contentType = event.headers['content-type'] || '';
     if (!contentType.includes('application/json')) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: "JSON required", success: false })
-      };
+      return formatResponse(400, headers, {}, "JSON required");
     }
 
     let req;
     try {
       req = JSON.parse(event.body || '{}');
     } catch (e) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: "JSON parse error", details: e.message, success: false })
-      };
+      return formatResponse(400, headers, { details: e.message }, "JSON parse error");
     }
 
     if (!req.audio) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: "No audio data", success: false })
-      };
+      return formatResponse(400, headers, {}, "No audio data");
     }
 
     if (!process.env.OPENAI_API_KEY) {
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ error: "API key missing", success: false })
-      };
+      return formatResponse(500, headers, {}, "API key missing");
     }
 
     // 音声データの準備と検証
@@ -185,11 +213,7 @@ exports.handler = async function(event, context) {
     const audioBuffer = Buffer.from(req.audio, 'base64');
     const sizeMB = audioBuffer.length / (1024 * 1024);
     if (sizeMB > 9.5) {
-      return {
-        statusCode: 413,
-        headers,
-        body: JSON.stringify({ error: "Audio too large (>10MB)", success: false })
-      };
+      return formatResponse(413, headers, {}, "Audio too large (>10MB)");
     }
 
     // Whisper APIを呼び出し
@@ -199,6 +223,12 @@ exports.handler = async function(event, context) {
 
     // 音声認識結果の補正処理
     let recognizedText = resp.data.text || '';
+    
+    // 認識テキストが空かチェック
+    if (!recognizedText.trim()) {
+      return formatResponse(422, headers, {}, "音声認識テキストが空です");
+    }
+    
     let correctedText = correctKindergartenTerms(recognizedText);
     
     // 入力と修正結果が異なる場合はログ出力
@@ -208,34 +238,23 @@ exports.handler = async function(event, context) {
       console.log("After:", correctedText);
     }
 
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ 
-        text: correctedText, 
-        originalText: recognizedText,
-        success: true 
-      })
-    };
+    // 一貫したレスポンス形式で返す
+    return formatResponse(200, headers, { 
+      text: correctedText, 
+      originalText: recognizedText,
+      timestamp: Date.now()
+    });
 
   } catch (error) {
     console.error("STT error:", error);
     if (error.stack) console.error(error.stack);
     
     if (axios.isAxiosError(error) && error.code === 'ECONNABORTED') {
-      return {
-        statusCode: 504,
-        headers,
-        body: JSON.stringify({ error: "Timeout", details: error.message, success: false })
-      };
+      return formatResponse(504, headers, { details: error.message }, "Timeout");
     }
     
     const status = error.response?.status || 500;
     const detail = error.response?.data || error.message;
-    return {
-      statusCode: status,
-      headers,
-      body: JSON.stringify({ error: "Whisper API error", details: detail, success: false })
-    };
+    return formatResponse(status, headers, { details: detail }, "Whisper API error");
   }
 };
