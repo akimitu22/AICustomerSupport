@@ -5,90 +5,11 @@
 const correctionDictionary = {
   "ようちえん": "幼稚園",
   "ほいくえん": "保育園",
-  "願症": "願書",
-  // corrections-dictionary.jsから統合
-  "園見学": ["円見学", "遠見学"],
-  "園長": ["延長", "円長"],
-  "送り迎え": ["送り無かえ", "送り向かえ"],
-  "午睡": ["誤推", "午水"],
-  "クラス担任": ["暮らす担任", "クラス担当"],
-  "食育": ["職育", "食益"],
-  "トイレトレーニング": ["トレーナー", "トレーニング分断"],
-  "慣らし保育": ["慣らし歩育", "習らし保育"],
-  "在園児": ["在円児", "罪園児"],
-  "保育時間": ["歩育時間", "保育字間"],
-  "早朝保育": ["総長保育", "早朝歩育"],
-  "延長保育": ["園長保育", "延長歩育"],
-  "ホームクラス": ["フォームクラス", "ホーム暮らす"],
-  "通園バス": ["通円バス", "痛園バス"],
-  "登園": ["盗園", "塔園"],
-  "降園": ["公園", "講園"],
-  "礼拝": ["礼杯", "冷配"],
-  "英語遊び": ["英後遊び", "英語阿蘇美"],
-  "体操遊び": ["体操阿蘇美", "代走遊び"],
-  "生活発表会": ["生活発票会", "性活発表会"],
-  "音楽鑑賞会": ["音楽鑑賞解", "音がく鑑賞会"],
-  "冷暖房費": ["冷暖房非", "霊暖房費"],
-  "通園バス維持費": ["通円バス維持非", "痛園バス維持費"],
-  "父母の会費": ["父母の絵非", "父母の快非"],
-  "感染症対策費": ["感染症対策非", "感線症対策費"],
-  "保険料": ["補件料", "歩剣料"],
-  "保育参観": ["歩育参観", "保育三環"],
-  "麦わら帽子": ["麦藁帽子", "ムギワラ帽子"],
-  "返金": ["偏禁", "変金"],
-  "キリスト教保育": ["基督京保育", "キリスト教歩育"],
-  "幼児教育無償化": ["幼児教育夢償化", "陽児教育無償化"],
-  "園外活動": ["円外活動", "遠外活動"],
-  "保育相談": ["歩育相談", "保育壮断"],
-  "園庭遊戯": ["円庭遊戯", "遠庭遊技"],
-  "新入園児面接会": ["新入円児面接解", "晋入園児面接会"],
-  "保育内容": ["歩育内容", "保育内要"],
-  "保育目標": ["歩育目標", "保育木表"],
-  "保育スケジュール": ["歩育スケジュール", "保育捨て樹流"],
-  "園舎": ["円舎", "遠舎"],
-  "園外保育": ["円外保育", "遠外歩育"],
-  "子育て支援": ["子育支援", "固育て支援"],
-  "未就園児教室": ["未就円児教室", "味就園児教室"],
-  "体験入園": ["体検入園", "体験入円"],
-  "体育指導": ["体行く指導", "代育指導"],
-  "英語指導": ["英後指導"],
-  "栄養士": ["営養士", "永陽子"],
-  "入園手続き": ["入円手続き", "乳円手続き"],
-  "申込書": ["申し込み書", "毛詩込書"]
+  "願症": "願書"
 };
-
 const kanaCorrectionMap = new Map([
   ["ようちえん", "幼稚園"],
-  ["ほいくえん", "保育園"],
-  // kana-corrections.jsから統合
-  ["あすかいほいく", "あずかりほいく"],
-  ["あずかいほいく", "あずかりほいく"],
-  ["あずかいほけん", "あずかりほいく"],
-  ["あすかりほいく", "あずかりほいく"],
-  ["あずかりほけん", "あずかりほいく"],
-  ["あすかりほけん", "あずかりほいく"],
-  ["あずかりほいっく", "あずかりほいく"],
-  ["そつえんし", "そつえんじ"],
-  ["そつえんず", "そつえんじ"],
-  ["そつえんぢ", "そつえんじ"],
-  ["そつえんじん", "そつえんじ"],
-  ["ようちえ", "ようちえん"],
-  ["よーちえん", "ようちえん"],
-  ["よーちえ", "ようちえん"],
-  ["ようちえんいん", "ようちえん"],
-  ["えんけがく", "えんけんがく"],
-  ["えんけんが", "えんけんがく"],
-  ["えんけんがっ", "えんけんがく"],
-  ["えんちょー", "えんちょう"],
-  ["えんちよー", "えんちょう"],
-  ["とうえ", "とうえん"],
-  ["とうえーん", "とうえん"],
-  ["こうえ", "こうえん"],
-  ["こうえーん", "こうえん"],
-  ["つーえんばす", "つうえんばす"],
-  ["つうえんばっす", "つうえんばす"],
-  ["くらすたんに", "くらすたんにん"],
-  ["くらすたーにん", "くらすたんにん"]
+  ["ほいくえん", "保育園"]
 ]);
 
 // ブラウザ固有のAPI
@@ -101,7 +22,7 @@ class HybridVoiceRecognition {
       continuous: true,
       interimResults: true,
       maxAlternatives: 3,
-      whisperApiEndpoint: '/api/stt',
+      whisperApiEndpoint: '/api/stt', // Netlify関数のエンドポイント
       debug: false,
       namespace: 'HybridVoiceRecognition',
       autoRestart: true,
@@ -579,7 +500,7 @@ class HybridVoiceRecognition {
     ) ? 0.15 : 0;
     
     const finalScore = Math.min(Math.max(
-      (lengthScore * 0.5 + durationScore * 0.5) + keywordBonus, 0
+      (lengthScore * 1.0 + durationScore * 1.0) + keywordBonus, 0
     ), 1);
     
     this._log(`Whisper信頼性スコア計算: length=${lengthScore.toFixed(2)}, duration=${durationScore.toFixed(2)}, keyword=${keywordBonus.toFixed(2)} => ${finalScore.toFixed(2)}`);
@@ -718,18 +639,12 @@ class HybridVoiceRecognition {
   _correctText(text) {
     if (!text) return '';
     
-    // ひらがな誤変換を一次補正（kanaCorrectionMap）
     if (this.kanaCorrectionMap && this.kanaCorrectionMap.size) {
-      let corrected = text;
-      for (const [incorrect, correct] of this.kanaCorrectionMap) {
-        corrected = corrected.replace(new RegExp(incorrect, 'gi'), correct);
-      }
-      text = corrected;
+      text = this.kanaCorrectionMap.get(text) || text;
     }
 
     let corrected = text;
     
-    // 「願書」の特別処理（最優先）
     const ganshoPriority = [
       /眼症/g, /がんしょう/g, /がんしょ/g, /顔書/g, /顔症/g, 
       /眼書/g, /元書/g, /限症/g, /眼上/g, /願症/g
@@ -743,7 +658,6 @@ class HybridVoiceRecognition {
       }
     }
     
-    // 「ホザナ」の特別処理
     const hosanaPatterns = [
       /[ほホ][うウゥーさザ][なナざザ][なナ]?/gi,
       /[ほホ][ーさザ][なナざザ][なナ]?/gi,
@@ -754,59 +668,40 @@ class HybridVoiceRecognition {
       corrected = corrected.replace(pattern, 'ホザナ');
     }
     
-    // 文中に「幼稚園」が出てきて園の名前がない場合、「ホザナ幼稚園」に補完
     if (/幼稚園/gi.test(corrected) && !(/ホザナ/gi.test(corrected))) {
       corrected = corrected.replace(/幼稚園/gi, 'ホザナ幼稚園');
     }
     
-    // 「〜が欲しい」や「〜はどこ」などの表現で「願書」のコンテキストを検出
     if (/[がは](欲しい|ほしい|どこ|どれ|必要)/i.test(corrected)) {
       corrected = corrected.replace(/眼症|がんしょう|がんしょ|顔書|顔症/gi, '願書');
     }
     
-    // 「〜行ったらいい」などの質問形式での文脈でも「願書」に修正
     if (/行った(ら|方が)いい|行け(ば|ます)|もらえ(る|ます)|入手/i.test(corrected)) {
       corrected = corrected.replace(/眼症|がんしょう|がんしょ|顔書|顔症/gi, '願書');
     }
     
-    // correctionDictionaryを使用した補正
-    Object.entries(this.correctionDictionary).forEach(([correct, patterns]) => {
-      if (Array.isArray(patterns)) {
-        patterns.forEach(pattern => {
-          const regex = new RegExp(`\\b${pattern}\\b`, 'gi');
-          corrected = corrected.replace(regex, correct);
-        });
-      } else {
-        const regex = new RegExp(`\\b${patterns}\\b`, 'gi');
-        corrected = corrected.replace(regex, correct);
-      }
-    });
+    if (this.morphAnalyzer) {
+      corrected = this._correctWithMorphology(corrected);
+    } else {
+      Object.entries(this.correctionDictionary).forEach(([pattern, replacement]) => {
+        const regex = new RegExp(`\\b${pattern}\\b`, 'gi');
+        corrected = corrected.replace(regex, replacement);
+      });
+    }
     
-    // 「円」→「園」の特殊変換
     corrected = corrected.replace(/(\d+)([万千百十]?)円/g, '$1$2円');
     corrected = corrected.replace(/([^\d０-９万千百十])円/g, '$1園');
         
-    // 「預かり保育」が「扱い保育」になる誤りを修正
     corrected = corrected.replace(/扱い保育/g, '預かり保育');
-    
-    // 「制服」が「征服」「正服」になる誤りを修正
     corrected = corrected.replace(/征服|正服/g, '制服');
-    
-    // 幼稚園名の誤認識を修正
-    corrected = corrected.replace(/幼い幼稚園|小棚幼稚園/g, 'ホザナ幼稚園');
-    
-    // 「預かり」が「扱い」になる誤りを修正
+    corrected = corrected.replace(/児玉幼稚園|小棚幼稚園/g, 'ホザナ幼稚園');
     corrected = corrected.replace(/\b扱い(保育|時間)\b/g, '預かり$1');
     
-    // 保育園、幼稚園などの語彙が欠けている場合に補完
     if (/園に(つい|関し|ある|入り)/i.test(corrected) && !/(幼稚園|保育園|こども園)/i.test(corrected)) {
       corrected = corrected.replace(/園に/i, 'ホザナ幼稚園に');
     }
     
-    // 「〜しますか？」が「〜しますから？」になる誤りを修正
     corrected = corrected.replace(/しますから\?/g, 'しますか?');
-    
-    // ひらがなだけの「ようちえん」を「幼稚園」に変換
     corrected = corrected.replace(/ようちえん/g, '幼稚園');
     
     if (this.options.debug && corrected !== text) {
@@ -826,40 +721,21 @@ class HybridVoiceRecognition {
       for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
         const lowerToken = token.toLowerCase();
-        let correctedToken = token;
-        
-        // correctionDictionaryをチェック
-        for (const [correct, patterns] of Object.entries(this.correctionDictionary)) {
-          if (Array.isArray(patterns)) {
-            if (patterns.includes(lowerToken)) {
-              correctedToken = correct;
-              break;
-            }
-          } else if (lowerToken === patterns) {
-            correctedToken = correct;
-            break;
-          }
-        }
-        
-        // kanaCorrectionMapをチェック
-        if (this.kanaCorrectionMap.has(lowerToken)) {
-          correctedToken = this.kanaCorrectionMap.get(lowerToken);
-        }
-        
-        // 「円」「えん」の特殊処理
-        if (lowerToken === 'えん' || lowerToken === '円') {
+        if (this.correctionDictionary[lowerToken]) {
+          correctedTokens.push(this.correctionDictionary[lowerToken]);
+        } else if (lowerToken === 'えん' || lowerToken === '円') {
           const prevToken = i > 0 ? tokens[i-1] : '';
           const isNumber = /^[0-9０-９]+$/.test(prevToken);
           const isUnit = /[万千百十]/.test(prevToken);
           
           if (isNumber || isUnit) {
-            correctedToken = '円';
+            correctedTokens.push('円');
           } else {
-            correctedToken = '園';
+            correctedTokens.push('園');
           }
+        } else {
+          correctedTokens.push(token);
         }
-        
-        correctedTokens.push(correctedToken);
       }
       
       return correctedTokens.join('');
