@@ -13,7 +13,7 @@ let isPlayingAudio = false;
 let recordingStartTime = 0;
 let currentSessionId = localStorage.getItem('kindergarten_session_id') || '';
 let conversationStage = 'initial';
-let currentAudio = null;
+window.currentAudio = null;                         // 修正: グローバルへ
 
 /* ───────── VAD 初期化 ───────── */
 startVAD().catch(err=>{
@@ -98,7 +98,6 @@ async function handleRecordingStop() {
     
     console.log("STT結果:", stt);
     
-    // 以下は既存の処理と同様
     if (!stt.text?.trim()) {
       console.error("STT結果が空です");
       statusEl.textContent = '❌ 発話認識失敗';
@@ -139,7 +138,6 @@ async function handleAI(msg){
     localStorage.setItem('kindergarten_session_id', currentSessionId);
     conversationStage = ai.stage;
 
-    // 中間メッセージを非表示
     hideInterimMessage();
     
     setTimeout(() => {replyEl.textContent = `サポートからの回答: ${ai.reply}`;}, 500);
@@ -182,16 +180,13 @@ async function handleAI(msg){
 
 // 中間メッセージを表示する関数
 function showInterimMessage(text) {
-  // 既存の中間メッセージ要素があれば再利用、なければ作成
   let interimEl = document.getElementById('interim-message');
   if (!interimEl) {
     interimEl = document.createElement('div');
     interimEl.id = 'interim-message';
     interimEl.className = 'message ai-message interim';
-    // replyElの前に挿入
     replyEl.parentNode.insertBefore(interimEl, replyEl);
   }
-  
   interimEl.textContent = text;
   interimEl.style.display = 'block';
 }
@@ -199,33 +194,31 @@ function showInterimMessage(text) {
 // 中間メッセージを非表示にする関数
 function hideInterimMessage() {
   const interimEl = document.getElementById('interim-message');
-  if (interimEl) {
-    interimEl.style.display = 'none';
-  }
+  if (interimEl) interimEl.style.display = 'none';
 }
 
 function playAudio(url) {
-  console.log("playAudio関数が呼び出されました");
   return new Promise((resolve, reject) => {
     try {
-      if (isPlayingAudio && currentAudio) {
+      if (isPlayingAudio && window.currentAudio) {
         console.log("既存の音声を停止");
-        currentAudio.pause();
+        window.currentAudio.pause();
+        window.currentAudio = null;
       }
       
-      currentAudio = new Audio(url);
+      window.currentAudio = new Audio(url);          // 修正: グローバル変数
       console.log("Audioオブジェクト作成完了");
       
-      currentAudio.onerror = (e) => {
+      window.currentAudio.onerror = (e) => {
         console.error("音声読み込みエラー:", e);
         reject(new Error("音声の読み込みに失敗しました"));
       };
       
-      currentAudio.oncanplaythrough = () => {
+      window.currentAudio.oncanplaythrough = () => {
         console.log("音声再生準備完了");
         isPlayingAudio = true;
         
-        const playPromise = currentAudio.play();
+        const playPromise = window.currentAudio.play();
         if (playPromise !== undefined) {
           playPromise
             .then(() => console.log("音声再生開始"))
@@ -236,7 +229,7 @@ function playAudio(url) {
         }
       };
       
-      currentAudio.onended = () => {
+      window.currentAudio.onended = () => {
         console.log("音声再生終了");
         isPlayingAudio = false;
         resolve();
