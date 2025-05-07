@@ -1,20 +1,12 @@
-﻿import express from 'express';
-import multer from 'multer';
-import axios from 'axios';
-import fs from 'fs';
-import path from 'path';
-import FormData from 'form-data';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import 'dotenv/config';
-import ffmpegPath from 'ffmpeg-static';
-import KuroshiroModule from 'kuroshiro';
-import KuromojiAnalyzer from 'kuroshiro-analyzer-kuromoji';
-import { kindergartenQA } from './QandA.json';
-
-const Kuroshiro = KuroshiroModule.default;
-const kuro = new Kuroshiro();
-await kuro.init(new KuromojiAnalyzer());
+﻿const express = require('express');
+const multer = require('multer');
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const FormData = require('form-data');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+require('dotenv/config');
 
 const execPromise = promisify(exec);
 const app = express();
@@ -36,22 +28,11 @@ const STAGES = {
 app.post('/stt', upload.single('audio'), async (req, res) => {
   try {
     const audioPath = req.file.path;
-    const wavPath = `${audioPath}.wav`;
-
-    let useWav = false;
-    if (ffmpegPath) {
-      try {
-        await execPromise(`"${ffmpegPath}" -i "${audioPath}" -ar 16000 -ac 1 "${wavPath}"`);
-        useWav = true;
-      } catch (err) {
-        console.error(`FFmpeg failed: ${err.message}`);
-      }
-    }
 
     const fd = new FormData();
-    fd.append('file', fs.createReadStream(useWav ? wavPath : audioPath), {
-      filename: path.basename(useWav ? wavPath : audioPath),
-      contentType: useWav ? 'audio/wav' : 'audio/webm'
+    fd.append('file', fs.createReadStream(audioPath), {
+      filename: path.basename(audioPath),
+      contentType: 'audio/webm'
     });
     fd.append('model', 'whisper-1');
     fd.append('language', 'ja');
@@ -67,14 +48,12 @@ app.post('/stt', upload.single('audio'), async (req, res) => {
       }
     );
 
-    res.json({ text: data.text ?? '' });
+    res.json({ text: data.text?.toLowerCase() || '' });
   } catch (e) {
     console.error('STT error:', e);
     res.status(500).json({ error: '音声認識失敗' });
   } finally {
     if (req.file?.path) fs.unlink(req.file.path, () => {});
-    const wav = `${req.file?.path}.wav`;
-    if (wav && fs.existsSync(wav)) fs.unlink(wav, () => {});
   }
 });
 
@@ -91,14 +70,12 @@ function analyzeStage(msg, stage) {
 function systemPrompt() {
   return `ホザナ幼稚園の入園コンシェルジュです。園に関する質問に250文字程度で親切・丁寧に回答してください。
 
-以下のQandA情報を必ず参考にしてください。しかし、単に情報をそのまま繰り返すのではなく、自然な対話を心がけて回答してください。
-
 ※見学を希望される方には「このページ上部の見学予約ボタンからお申し込みください」と案内してください。
 ※電話番号は絶対に読み上げないでください。
 ※お問い合わせには「ホームページのお問い合わせフォームからどうぞ」と案内してください。
 ※「電話でのお問い合わせ」という言葉や電話番号は絶対に使わないでください。
 
-不明点は「園へお問い合わせください」と案内してください。また、絶対に「入園」を「入院」と誤変換して理解しないでください。幼稚園へのお問い合わせに「入院」は絶対にありえません。それと「眼症」も絶対にありえません。それは100％「願書」の意味です。また「扱い保育」という言葉も存在しませんｎ。日本語として不自然に感じた場合は一番近いものを探して解釈してください。たとえば「扱い保育」は「預かり保育」を意味する、とそう解釈してください。要するに、すべて幼稚園関係の言葉だと幼稚園関係用語に変換して対応してください。仮にそれがひやかしなどで、幼稚園関係のものでないとしても、幼稚園以外の質問に回答する必要はありません。`;
+不明点は「園へお問い合わせください」と案内してください。また、絶対に「入園」を「入院」と誤変換して理解しないでください。幼稚園へのお問い合わせに「入院」は絶対にありえません。それと「眼症」も絶対にありえません。それは100％「願書」の意味です。また「扱い保育」という言葉も存在しません。日本語として不自然に感じた場合は一番近いものを探して解釈してください。たとえば「扱い保育」は「預かり保育」を意味する、とそう解釈してください。要するに、すべて幼稚園関係の言葉だと幼稚園関係用語に変換して対応してください。仮にそれがひやかしなどで、幼稚園関係のものでないとしても、幼稚園以外の質問に回答する必要はありません。`;
 }
 
 app.post('/ai', async (req, res) => {
@@ -111,10 +88,6 @@ app.post('/ai', async (req, res) => {
     sess.history.push({ role: 'user', content: message });
     sess.stage = analyzeStage(message, sess.stage);
 
-    const qaContext = kindergartenQA
-      .map(q => `Q: ${q.question}\nA: ${q.answer}`)
-      .join('\n');
-
     const { data } = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
@@ -122,18 +95,12 @@ app.post('/ai', async (req, res) => {
         messages: [
           {
             role: 'system',
-            content: `${systemPrompt()}
-
-以下はホザナ幼稚園の公式QandAです。これらの情報を元に、自然な会話を心がけて回答してください。同じ質問に対しても少し表現を変えるなど、バリエーションを持たせてください：
-
------ QandA -----
-${qaContext}
-----------------`
+            content: systemPrompt()
           },
           ...sess.history.slice(-5)
         ],
         max_tokens: 400,
-        temperature: 0.7  // 多様な応答のために少し上げる
+        temperature: 0.7
       },
       { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
     );
@@ -150,7 +117,6 @@ ${qaContext}
 });
 
 /* ───── TTS (Google APIキー方式) ───── */
-// マークダウンをSSMLに変換
 function convertMarkdownToSSML(text) {
   return text
     .replace(/^#{1,6}\s*/gm, '')
@@ -159,7 +125,6 @@ function convertMarkdownToSSML(text) {
     .replace(/__(.+?)__/g, '<emphasis level="strong">$1</emphasis>');
 }
 
-// 電話番号をSSML形式に変換
 function formatPhoneNumbers(text) {
   return text.replace(
     /(\d{2,4})[-\s]?(\d{2,4})[-\s]?(\d{2,4})/g, 
@@ -167,7 +132,6 @@ function formatPhoneNumbers(text) {
   );
 }
 
-// URLや特殊文字を音声用に調整
 function optimizeTextForSpeech(text) {
   return text
     .replace(/https?:\/\/[^\s]+/g, 'ホームページのリンク')
@@ -211,7 +175,6 @@ async function synthesize(text) {
     return `data:audio/mpeg;base64,${data.audioContent}`;
   } catch (error) {
     console.error('Google TTS API error:', error.response?.data || error.message);
-    // フォールバック：Standard音声に切り替え
     try {
       const { data } = await axios.post(
         `https://texttospeech.googleapis.com/v1/text:synthesize?key=${process.env.GOOGLE_API_KEY}`,
@@ -227,7 +190,6 @@ async function synthesize(text) {
       );
       return `data:audio/mpeg;base64,${data.audioContent}`;
     } catch (fallbackError) {
-      // それでも失敗したら、モデル指定なしで試す
       const { data } = await axios.post(
         `https://texttospeech.googleapis.com/v1/text:synthesize?key=${process.env.GOOGLE_API_KEY}`,
         {
@@ -251,7 +213,6 @@ app.post('/tts', async (req, res) => {
     
     let audioUrl;
     if (ssml && ssml.trim()) {
-      // SSMLが提供されている場合は直接使用
       const finalSSML = ssml.includes('<speak>') ? ssml : `<speak>${ssml}</speak>`;
       const { data } = await axios.post(
         `https://texttospeech.googleapis.com/v1/text:synthesize?key=${process.env.GOOGLE_API_KEY}`,
@@ -268,7 +229,6 @@ app.post('/tts', async (req, res) => {
       );
       audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
     } else {
-      // テキストからSSML生成
       audioUrl = await synthesize(text);
     }
     
@@ -279,4 +239,9 @@ app.post('/tts', async (req, res) => {
   }
 });
 
-export default app;
+module.exports = app;
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 サーバーが起動しました: http://localhost:${PORT}`);
+});
