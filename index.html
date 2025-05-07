@@ -1,0 +1,461 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ホザナ幼稚園 音声サポート</title>
+  <!-- head タグ内に追加 -->
+  <style>
+    body {
+      font-family: "Yu Gothic", sans-serif;
+      margin: 0;
+      padding: 1.5em;
+      background: #f4f8fc;
+      color: #333;
+    }
+    h1 {
+      text-align: center;
+      color: #2a5d84;
+    }
+    .status, .recognized, .reply {
+      margin: 1em 0;
+      padding: 1em;
+      background: #fff;
+      border-left: 5px solid #2a5d84;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    #quick-links {
+      margin-top: 1.5em;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 0.5em;
+    }
+    .ql {
+      padding: 0.6em 1em;
+      background: #2a5d84;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .ql:hover {
+      background: #1b4767;
+    }
+    .action-btn {
+      padding: 0.5em 1.2em;
+      margin: 0.5em;
+      background: #777;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .action-btn:hover {
+      background: #555;
+    }
+    /* 重要なリンクエリア */
+    .important-links {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 1em;
+      margin: 1.5em 0;
+      padding: 1em;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .important-link {
+      display: flex;
+      align-items: center;
+      padding: 0.8em 1.5em;
+      background: #4a8ab8;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: bold;
+      transition: all 0.3s ease;
+    }
+    .important-link:hover {
+      background: #2a5d84;
+      transform: translateY(-2px);
+      box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+    }
+    .important-link img, .important-link svg {
+      margin-right: 0.5em;
+      width: 24px;
+      height: 24px;
+    }
+    footer {
+      text-align: center;
+      margin-top: 2em;
+      font-size: 0.9em;
+      color: #777;
+    }
+    /* 音声サポート切り替えボタン */
+    .voice-support-toggle {
+      position: fixed;
+      bottom: 2em;
+      right: 2em;
+      background: #2a5d84;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 60px;
+      height: 60px;
+      font-size: 24px;
+      cursor: pointer;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    /* ヘルプテキスト */
+    .toggle-help-text {
+      position: fixed;
+      bottom: 5.5em;
+      right: 2em;
+      background: white;
+      padding: 0.5em 1em;
+      border-radius: 20px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+      font-size: 14px;
+      max-width: 200px;
+      text-align: center;
+      z-index: 99;
+    }
+    .voice-support-container {
+      display: none;
+      margin-top: 2em;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 1em;
+      background: #f9f9f9;
+    }
+    .voice-support-container.active {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>ホザナ幼稚園</h1>
+
+  <!-- 重要なリンク -->
+  <div class="important-links">
+    <a href="https://hosana-kindergarten.com/幼稚園見学予約/" target="_blank" class="important-link" onclick="return navigateWithoutSound(this);">
+      <svgDidn't xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 9h18v10a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
+        <path d="M3 9l2.45-4.9A2 2 0 017.24 3h9.52a2 2 0 011.8 1.1L21 9"></path>
+        <path d="M12 3v6"></path>
+      </svg>
+      見学予約
+    </a>
+    <a href="https://hosana-kindergarten.com/entrance-childcare" target="_blank" class="important-link" onclick="return navigateWithoutSound(this);">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M4 19.5A2.5 2.5 0 016.5 17H20"></path>
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"></path>
+      </svg>
+      入園案内
+    </a>
+    <a href="https://hosana-kindergarten.com/contact/" target="_blank" class="important-link" onclick="return navigateWithoutSound(this);">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"></path>
+      </svg>
+      お問い合わせ
+    </a>
+    <a href="tel:048-555-2301" class="important-link" onclick="return callWithoutSound(this);">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.36 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.34 1.85.573 2.81.7A2 2 0 0122 16.92z"></path>
+      </svg>
+      電話で相談
+    </a>
+  </div>
+
+  <!-- 音声サポート切り替えボタン -->
+  <div id="toggle-help-text" class="toggle-help-text">🎤をクリックしてお話しください</div>
+  <button id="voice-support-toggle" class="voice-support-toggle">🎤</button>
+
+  <!-- 音声サポートコンテナ -->
+  <div id="voice-support" class="voice-support-container">
+    <h2>音声サポート</h2>
+    <div id="status" class="status">🎤 マイク準備中です…</div>
+    <div id="recognized" class="recognized"></div>
+    <div id="reply" class="reply"></div>
+
+    <div id="quick-links"></div>
+
+  </div>
+
+  <footer>
+    © 2025 ホザナ幼稚園<br>
+    お気軽にご質問ください。
+  </footer>
+
+  <!-- 外部リンク処理のためのスクリプト -->
+  <script>
+    // 音声機能をトリガーせずにリンクを開く
+    function navigateWithoutSound(link) {
+      window.open(link.href, '_blank');
+      return false; // デフォルトのクリックイベントをキャンセル
+    }
+    
+    // 音声機能をトリガーせずに電話をかける
+    function callWithoutSound(link) {
+      window.location.href = link.href;
+      return false; // デフォルトのクリックイベントをキャンセル
+    }
+    
+    // 全ての音声を停止
+    function stopAllAudio() {
+      // 現在再生中の音声を停止
+      if (window.currentAudio) {
+        window.currentAudio.pause();
+        window.currentAudio = null;
+      }
+      
+      // 他の音声関連のクリーンアップ
+      if (window.mediaRecorder && window.mediaRecorder.state === 'recording') {
+        window.mediaRecorder.stop();
+      }
+      
+      console.log('すべての音声を停止しました');
+    }
+  </script>
+
+  <!-- client.js 読み込み前の script タグ内に追加 -->
+  <script>
+    // グローバル変数にハイブリッド音声認識を保持
+    // window.hybridRecognition = null;
+    
+    // Tiny Segmenterの読み込み（形態素解析用）
+    /*
+    document.addEventListener('DOMContentLoaded', function() {
+      const tinySegmenterScript = document.createElement('script');
+      tinySegmenterScript.src = 'https://cdn.jsdelivr.net/npm/tiny-segmenter@0.2.0/tiny_segmenter.min.js';
+      tinySegmenterScript.onload = function() {
+        console.log('TinySegmenter読み込み完了');
+      };
+      document.head.appendChild(tinySegmenterScript);
+    });
+    */
+    
+    // client.js読み込み時にハイブリッド音声認識を初期化する関数
+    /*
+    function initHybridRecognition() {
+      if (window.HybridVoiceRecognition && !window.hybridRecognition) {
+        window.hybridRecognition = new HybridVoiceRecognition({
+          language: 'ja-JP',
+          whisperApiEndpoint: './.netlify/functions/stt',
+          debug: true
+        });
+        console.log('幼稚園特化型ハイブリッド音声認識を初期化しました');
+      }
+    }
+    */
+    
+    // DOMContentLoaded イベントで初期化も行う
+    /*
+    document.addEventListener('DOMContentLoaded', function() {
+      // スクリプトがすでに読み込まれている場合に初期化
+      if (window.HybridVoiceRecognition) {
+        initHybridRecognition();
+      }
+    });
+    */
+    
+    // client.jsのロード完了を監視するためのカスタムイベント
+    /*
+    document.addEventListener('clientLoaded', function() {
+      initHybridRecognition();
+    });
+    */
+    
+    // 元のVAD関数を保存
+    const originalStartVAD = window.startVAD;
+    
+    // 新しいVAD関数を設定
+    /*
+    window.startVAD = function() {
+      // ハイブリッド認識の開始
+      if (window.hybridRecognition) {
+        window.hybridRecognition.startListening(
+          // 中間結果（認識中）
+          function(text) {
+            const recognizedElement = document.getElementById('recognized');
+            if (recognizedElement) {
+              recognizedElement.innerHTML = `<em>(認識中): ${text}</em>`;
+            }
+          },
+          // 最終結果
+          function(result) {
+            const recognizedElement = document.getElementById('recognized');
+            if (recognizedElement) {
+              recognizedElement.innerHTML = `<strong>あなた:</strong> ${result.text} <small>(${result.engine})</small>`;
+            }
+            
+            // client.jsの応答関数を呼び出し
+            if (window.processVoiceInput) {
+              window.processVoiceInput(result.text);
+            }
+          },
+          // エラー
+          function(error) {
+            console.error('認識エラー:', error);
+            const statusElement = document.getElementById('status');
+            if (statusElement) {
+              if (error.error === 'mic-permission') {
+                // マイク許可エラーの特別処理
+                statusElement.innerHTML = `🔴 マイクの使用許可が必要です。設定を確認してください。`;
+              } else {
+                statusElement.innerHTML = `🔴 エラー: ${error.error || 'Unknown'} (${error.engine || 'system'})`;
+              }
+            }
+          }
+        );
+      }
+      
+      // 元のstartVAD関数も呼び出す
+      if (originalStartVAD) {
+        window.voiceSupportActive = true;
+        return originalStartVAD();
+      }
+      
+      return Promise.resolve();
+    };
+    */
+  </script>
+
+  <!-- client.jsの読み込み部分を修正 -->
+  <script>
+    // 音声サポート切り替え
+    document.addEventListener('DOMContentLoaded', function() {
+      const toggleButton = document.getElementById('voice-support-toggle');
+      const toggleHelpText = document.getElementById('toggle-help-text');
+      const voiceSupportContainer = document.getElementById('voice-support');
+      
+      toggleButton.addEventListener('click', function() {
+        const isActive = voiceSupportContainer.classList.contains('active');
+        
+        // 音声サポートがオンの場合はオフにする
+        if (isActive) {
+          // UIの更新
+          voiceSupportContainer.classList.remove('active');
+          toggleButton.textContent = '🎤';
+          toggleHelpText.textContent = '🎤をクリックしてお話しください';
+          
+          // 音声を停止
+          stopAllAudio();
+          
+          // 音声サポートの完全停止
+          window.voiceSupportActive = false;
+          
+          // マイクを停止 - nullチェックを追加
+          if (window.micStream) {
+            try {
+              window.micStream.getTracks().forEach(track => track.stop());
+              window.micStream = null;
+            } catch (e) {
+              console.warn('マイク停止エラー:', e);
+            }
+          }
+          
+          // 音声コンテキストを停止 - nullチェックを追加
+          if (window.audioCtx && window.audioCtx.state !== 'closed') {
+            try {
+              window.audioCtx.close();
+              window.audioCtx = null;
+            } catch (e) {
+              console.warn('音声コンテキスト停止エラー:', e);
+            }
+          }
+          
+          // Web Speech APIの認識を停止
+          if (window.recognition) {
+            try {
+              window.recognition.abort();
+              window.recognition.stop();
+              window.recognition = null;
+            } catch (e) {
+              console.warn('Web Speech API停止エラー:', e);
+            }
+          }
+          
+          // ハイブリッド認識も停止
+          /*
+          if (window.hybridRecognition) {
+            try {
+              window.hybridRecognition.stopListening();
+              // リソース解放も試みる
+              if (typeof window.hybridRecognition.dispose === 'function') {
+                window.hybridRecognition.dispose();
+              }
+            } catch (e) {
+              console.warn('ハイブリッド認識停止エラー:', e);
+            }
+          }
+          */
+          
+          // ステータス表示をリセット
+          const statusElement = document.getElementById('status');
+          if (statusElement) {
+            statusElement.innerHTML = '🎤 音声認識は停止しています';
+          }
+          
+          console.log('音声サポートを完全に停止しました');
+        } else {
+          // 音声サポートをオンにする
+          voiceSupportContainer.classList.add('active');
+          toggleButton.textContent = '✕';
+          toggleHelpText.textContent = '✕をクリックして音声サポートを終了';
+          
+          // 音声サポートの開始
+          if (!window.clientScriptLoaded) {
+            const script = document.createElement('script');
+            script.src = 'client.js';
+            script.type = 'module';
+            
+            // スクリプト読み込み完了イベントを追加
+            script.onload = function() {
+              console.log('client.js読み込み完了');
+              // カスタムイベントを発行
+              document.dispatchEvent(new Event('clientLoaded'));
+              // ハイブリッド認識の初期化
+              // initHybridRecognition();
+            };
+            
+            document.body.appendChild(script);
+            window.clientScriptLoaded = true;
+          } else if (window.startVAD && !window.voiceSupportActive) {
+            // 再開
+            window.voiceSupportActive = true;
+            window.startVAD().catch(err => {
+              console.error('マイク再開失敗:', err);
+              // 失敗した場合は音声サポートをオフに戻す
+              voiceSupportContainer.classList.remove('active');
+              toggleButton.textContent = '🎤';
+              toggleHelpText.textContent = '🎤をクリックしてお話しください';
+              window.voiceSupportActive = false;
+            });
+          }
+        }
+      });
+    });
+  </script>
+
+  <!-- グローバル変数を追加して音声サポートの状態を管理 -->
+  <script>
+    // グローバル変数を追加して音声サポートの状態を管理
+    window.voiceSupportActive = false;
+    
+    // オリジナルのstartVAD関数をオーバーライド
+    window.originalStartVAD = window.startVAD;
+    window.startVAD = function() {
+      window.voiceSupportActive = true;
+      return window.originalStartVAD ? window.originalStartVAD() : Promise.reject('関数が見つかりません');
+    };
+  </script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'93c39c7aeb26bd48',t:'MTc0NjY1MTI1My4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
