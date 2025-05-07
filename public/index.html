@@ -297,8 +297,7 @@
           if (!window.clientScriptLoaded) {
             const script = document.createElement('script');
             script.src = 'client.js';
-            script.type = 'module';
-            
+
             // スクリプト読み込み完了イベントを追加
             script.onload = function() {
               console.log('client.js読み込み完了');
