@@ -1,690 +1,810 @@
 /**
- * 幼稚園特化型ハイブリッド音声認識 - 改良版
- * Web Speech API と Whisper API を組み合わせて精度を向上
- * 実運用環境を想定した堅牢な実装
+ * ハイブリッド音声認識システム
+ * Web Speech API と Whisper API を組み合わせた幼稚園特化の音声認識
  */
 class HybridVoiceRecognition {
+  /**
+   * コンストラクタ
+   * @param {Object} options - 設定オプション
+   * @param {string} options.language - 言語コード (default: 'ja-JP')
+   * @param {string} options.whisperApiEndpoint - Whisper API エンドポイント
+   * @param {boolean} options.debug - デバッグモード (default: false)
+   * @param {string} options.namespace - グローバル名前空間 (default: 'HybridVoiceRecognition')
+   */
   constructor(options = {}) {
+    // デフォルト設定とユーザー設定のマージ
     this.options = {
       language: 'ja-JP',
-      shortUtteranceThreshold: 3000, // 3秒以下は短い発話とみなす
-      whisperApiEndpoint: './.netlify/functions/stt', // 相対パスに修正
-      maxAudioSize: 8 * 1024 * 1024, // 8MBを上限に
-      namespace: '_hybridVR', // グローバル名前空間
+      continuous: true,
+      interimResults: true,
+      maxAlternatives: 3,
+      whisperApiEndpoint: null,
       debug: false,
+      namespace: 'HybridVoiceRecognition',
+      autoRestart: true,
+      confidenceThreshold: 0.7,
       ...options
     };
     
-    // グローバル名前空間の初期化
-    if (!globalThis[this.options.namespace]) {
-      globalThis[this.options.namespace] = {};
+    // 音声認識エンジンの初期化
+    this.webSpeechRecognition = null;
+    this.mediaRecorder = null;
+    this.audioChunks = [];
+    this.isListening = false;
+    this.isProcessing = false;
+    this.lastResult = null;
+    this.confidenceScores = { webSpeech: 0, whisper: 0 };
+    this.resultCallbacks = { interim: null, final: null, error: null };
+    
+    // 形態素解析のセットアップ
+    this.morphAnalyzer = typeof TinySegmenter !== 'undefined' ? new TinySegmenter() : null;
+    
+    // 修正辞書の初期化
+    this.correctionDictionary = {
+      // 幼稚園関連の単語修正
+      "ようちえん": "幼稚園",
+      "ほいくえん": "保育園",
+      "あずか": "預か",
+      "えんちょう": "園長",
+      "せんせい": "先生",
+      "ほいく": "保育",
+      
+      // 願書関連の誤認識パターンを追加
+      "眼症": "願書",
+      "がんしょう": "願書",
+      "がんしょ": "願書",
+      "顔書": "願書",
+      "顔症": "願書",
+      "眼書": "願書",
+      "元書": "願書",
+      "限症": "願書",
+      "眼上": "願書",
+      "願症": "願書"
+    };
+    
+    // 幼稚園関連の優先キーワードリスト
+    this.priorityKeywords = [
+      "ホザナ", "願書", "入園", "募集", "出願", "保育", "幼稚園", "制服"
+    ];
+    
+    // MIME タイプの検出
+    this._detectSupportedMimeType();
+    
+    // 名前空間に自身を登録
+    if (this.options.namespace) {
+      globalThis[this.options.namespace] = this;
     }
     
-    // Web Speech API の初期化
-    this.webSpeechRecognition = null;
-    this.webSpeechSupported = this._initWebSpeech();
-    
-    // MediaRecorder用のストリーム
-    this.stream = null;
-    
-    // 幼稚園特化の修正辞書
-    this.correctionDictionary = this._initCorrectionDictionary();
-    
-    // 形態素解析（ブラウザ依存）
-    this.morphAnalyzer = null;
-    this._initMorphAnalyzer();
-    
-    // 状態
-    this.isListening = false;
-    this.audioChunks = [];
-    this.mediaRecorder = null;
-    this.recordingStartTime = null;
-    
-    // 結果格納
-    this.webSpeechResult = null;
-    
-    // デバッグモード
-    this.debug = this.options.debug;
-    
-    this._log('幼稚園特化型ハイブリッド音声認識を初期化しました');
+    this._log('ハイブリッド音声認識システムを初期化しました');
   }
   
   /**
-   * デバッグログ
+   * デバッグログ出力
    */
   _log(...args) {
-    if (this.debug) {
+    if (this.options.debug) {
       console.log('[HybridVR]', ...args);
     }
   }
   
   /**
-   * エラーログ
+   * エラーログ出力
    */
   _error(...args) {
-    console.error('[HybridVR]', ...args);
+    console.error('[HybridVR Error]', ...args);
+  }
+  
+  /**
+   * サポートされている MIME タイプを検出
+   */
+  _detectSupportedMimeType() {
+    const types = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/ogg',
+      'audio/mp4',
+      'audio/mpeg',
+      'audio/wav',
+      'audio/aac'
+    ];
+    
+    this.mimeType = types.find(type => {
+      try {
+        return MediaRecorder.isTypeSupported(type);
+      } catch (e) {
+        return false;
+      }
+    }) || '';
+    
+    this._log('サポートされているMIMEタイプ:', this.mimeType || 'なし');
+  }
+  
+  /**
+   * ブラウザが Web Speech API をサポートしているか確認
+   */
+  _isSpeechRecognitionSupported() {
+    return 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window;
+  }
+  
+  /**
+   * ブラウザが MediaRecorder をサポートしているか確認
+   */
+  _isMediaRecorderSupported() {
+    return 'MediaRecorder' in window && this.mimeType !== '';
   }
   
   /**
    * Web Speech API の初期化
-   * @returns {boolean} サポート状況
    */
-  _initWebSpeech() {
-    const SpeechRecognition = window.SpeechRecognition || 
-                              window.webkitSpeechRecognition;
-    
-    if (!SpeechRecognition) {
-      this._log('このブラウザはWeb Speech APIをサポートしていません');
+  _initWebSpeechRecognition() {
+    if (!this._isSpeechRecognitionSupported()) {
+      this._log('Web Speech APIがサポートされていません');
       return false;
     }
     
-    try {
-      this.webSpeechRecognition = new SpeechRecognition();
-      this.webSpeechRecognition.lang = this.options.language;
-      // continuous = true に修正して長時間対応
-      this.webSpeechRecognition.continuous = true;
-      this.webSpeechRecognition.interimResults = true;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    this.webSpeechRecognition = new SpeechRecognition();
+    
+    this.webSpeechRecognition.lang = this.options.language;
+    this.webSpeechRecognition.continuous = this.options.continuous;
+    this.webSpeechRecognition.interimResults = this.options.interimResults;
+    this.webSpeechRecognition.maxAlternatives = this.options.maxAlternatives;
+    
+    // 結果イベント
+    this.webSpeechRecognition.onresult = (event) => {
+      const result = event.results[event.resultIndex];
+      const text = result[0].transcript.trim();
+      const isFinal = result.isFinal;
       
-      return true;
-    } catch (e) {
-      this._error('Web Speech API初期化エラー:', e);
-      return false;
-    }
-  }
-  
-  /**
-   * 形態素解析機能の初期化
-   */
-  _initMorphAnalyzer() {
-    // Tiny Segmenterを使用（軽量な日本語形態素解析）
-    if (typeof TinySegmenter !== 'undefined') {
-      this.morphAnalyzer = new TinySegmenter();
-      this._log('形態素解析を初期化しました');
-    } else {
-      // 動的にTinySegmenterをロード
-      this._loadScript('https://cdn.jsdelivr.net/npm/tiny-segmenter@0.2.0/tiny_segmenter.min.js')
-        .then(() => {
-          if (typeof TinySegmenter !== 'undefined') {
-            this.morphAnalyzer = new TinySegmenter();
-            this._log('形態素解析を初期化しました');
-          }
-        })
-        .catch(err => {
-          this._log('形態素解析のロードに失敗しました:', err);
-        });
-    }
-  }
-  
-  /**
-   * スクリプトを動的にロード
-   */
-  _loadScript(src) {
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = src;
-      script.onload = resolve;
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
-  }
-  
-  /**
-   * 修正辞書の初期化
-   */
-  _initCorrectionDictionary() {
-    return {
-      // 「ホザナ」の誤認識パターン（優先順位高）
-      'ホサナ': 'ホザナ',
-      'ほざな': 'ホザナ',
-      'ほさな': 'ホザナ',
-      'ほうさな': 'ホザナ',
-      '保座菜': 'ホザナ',
-      '保佐名': 'ホザナ',
-      '宝座名': 'ホザナ',
-      '穂佐奈': 'ホザナ',
-      '穂沢名': 'ホザナ',
-      '帆座名': 'ホザナ',
-      '歩座奈': 'ホザナ',
-      '歩佐名': 'ホザナ',
-      '保沢名': 'ホザナ',
-      'ほざなし': 'ホザナ',
+      // 信頼性スコアの計算
+      this.confidenceScores.webSpeech = this._calculateConfidenceScore(result);
       
-      // 入園関連の誤認識修正
-      '元祥': '願書',
-      'げんしょう': '願書',
-      '玄証': '願書',
-      '願状': '願書',
-      '源証': '願書',
-      '現象': '願書',
-      '願正': '願書',
+      // 中間結果のコールバック
+      if (!isFinal) {
+        this._handleInterimResult(text);
+        return;
+      }
       
-      // 園/円の修正
-      // 注: 実際の適用は_correctText内で文脈に基づき行う
-      '縁': '園',
-      '宴': '園',
-      '演': '園',
-      '延': '園',
-      '炎': '園',
-      
-      // 「幼稚園」の誤認識修正
-      '用紙園': '幼稚園',
-      '用地園': '幼稚園',
-      '洋紙園': '幼稚園',
-      '要旨園': '幼稚園',
-      '幼児園': '幼稚園',
-      '容姿園': '幼稚園',
-      '幼時代': '幼稚園',
-      
-      // 幼稚園特有の用語
-      '預かり保育': '預かり保育',
-      '課外教室': '課外教室',
-      '給食': '給食',
-      '制服': '制服',
-      '満3歳児': '満3歳児',
-      '年少': '年少',
-      '年中': '年中',
-      '年長': '年長',
-      '通園バス': '通園バス',
-      '入園': '入園',
-      '保育料': '保育料',
-      '説明会': '説明会',
-      '願書配布': '願書配布',
-      '願書受付': '願書受付',
-      '募集要項': '募集要項',
-      
-      // よくある誤認識の修正
-      'おしえて': '教えて',
-      'おねがいします': 'お願いします',
-      'わかりません': '分かりません',
-      'おしえてください': '教えてください',
-      'ありがとう': 'ありがとう',
-      'すみません': 'すみません',
-      'わかった': '分かった',
-      'つかえない': '使えない',
-      'つかえます': '使えます'
+      // 最終結果の処理
+      this._handleWebSpeechFinalResult(text, result);
     };
+    
+    // エラーイベント
+    this.webSpeechRecognition.onerror = (event) => {
+      this._handleSpeechRecognitionError(event);
+    };
+    
+    // 認識終了イベント
+    this.webSpeechRecognition.onend = () => {
+      this._log('Web Speech認識が終了しました');
+      
+      // 自動再起動が有効で、まだリスニング中の場合は再起動
+      if (this.options.autoRestart && this.isListening && !this.isProcessing) {
+        this._log('Web Speech認識を再起動します');
+        try {
+          this.webSpeechRecognition.start();
+        } catch (error) {
+          this._error('Web Speech認識の再起動に失敗:', error);
+          this._notifyError({
+            error: 'restart-failed',
+            message: 'Web Speech認識の再起動に失敗しました',
+            engine: 'webSpeech',
+            originalError: error
+          });
+        }
+      }
+    };
+    
+    return true;
   }
   
   /**
-   * サポートされているMIMEタイプを取得
-   * @returns {string} サポートされているMIMEタイプ
+   * Web Speech APIの中間結果を処理
    */
-  _getSupportedMimeType() {
-    const types = [
-      'audio/webm',
-      'audio/ogg;codecs=opus',
-      'audio/mp4',
-      'audio/wav'
-    ];
+  _handleInterimResult(text) {
+    const correctedText = this._correctText(text);
     
-    for (const type of types) {
-      if (MediaRecorder.isTypeSupported(type)) {
-        this._log(`サポートされているMIMEタイプ: ${type}`);
-        return type;
+    if (this.resultCallbacks.interim) {
+      this.resultCallbacks.interim(correctedText);
+    }
+  }
+  
+  /**
+   * Web Speech APIの最終結果を処理
+   */
+  _handleWebSpeechFinalResult(text, result) {
+    const correctedText = this._correctText(text);
+    
+    this.lastResult = {
+      text: correctedText,
+      engine: 'webSpeech',
+      confidence: this.confidenceScores.webSpeech,
+      timestamp: Date.now()
+    };
+    
+    // 信頼性スコアが閾値以上なら結果として採用
+    if (this.confidenceScores.webSpeech >= this.options.confidenceThreshold) {
+      this._notifyResult(this.lastResult);
+    } else {
+      // 信頼性が低い場合はWhisperを試す
+      this._log('Web Speech認識の信頼性が低いため (${this.confidenceScores.webSpeech})、Whisperで試行します');
+      this._useWhisperFallback();
+    }
+  }
+  
+  /**
+   * 信頼性スコアの計算
+   */
+  _calculateConfidenceScore(result) {
+    // 基本スコア（Web Speech APIのconfidence値）
+    let baseScore = result[0].confidence || 0;
+    
+    // 優先キーワードボーナス
+    const text = result[0].transcript.toLowerCase();
+    const keywordBonus = this.priorityKeywords.some(keyword => 
+      text.includes(keyword.toLowerCase())
+    ) ? 0.15 : 0;
+    
+    // 長さによるボーナス（短すぎる・長すぎる場合はペナルティ）
+    const lengthScore = text.length > 5 && text.length < 100 ? 0.1 : -0.1;
+    
+    // 代替候補の類似性ボーナス
+    let alternativeScore = 0;
+    if (result.length > 1) {
+      // 代替候補同士の類似度をチェック
+      const alternatives = Array.from({length: Math.min(result.length, 3)}, (_, i) => 
+        result[i].transcript.toLowerCase()
+      );
+      
+      // 最初の候補と他の候補の類似性をチェック
+      const similarCount = alternatives.slice(1).filter(alt => 
+        this._calculateSimilarity(alternatives[0], alt) > 0.7
+      ).length;
+      
+      alternativeScore = similarCount / (alternatives.length - 1) * 0.1;
+    }
+    
+    // 最終スコアの計算（0〜1の範囲に収める）
+    const finalScore = Math.min(Math.max(baseScore + keywordBonus + lengthScore + alternativeScore, 0), 1);
+    
+    this._log(`信頼性スコア計算: base=${baseScore.toFixed(2)}, keyword=${keywordBonus.toFixed(2)}, length=${lengthScore.toFixed(2)}, alt=${alternativeScore.toFixed(2)} => ${finalScore.toFixed(2)}`);
+    
+    return finalScore;
+  }
+  
+  /**
+   * 2つの文字列の類似度を計算（0〜1）
+   */
+  _calculateSimilarity(str1, str2) {
+    if (!str1 || !str2) return 0;
+    if (str1 === str2) return 1;
+    
+    // 編集距離の計算（レーベンシュタイン距離）
+    const len1 = str1.length;
+    const len2 = str2.length;
+    const matrix = Array(len1 + 1).fill().map(() => Array(len2 + 1).fill(0));
+    
+    for (let i = 0; i <= len1; i++) matrix[i][0] = i;
+    for (let j = 0; j <= len2; j++) matrix[0][j] = j;
+    
+    for (let i = 1; i <= len1; i++) {
+      for (let j = 1; j <= len2; j++) {
+        const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,       // 削除
+          matrix[i][j - 1] + 1,       // 挿入
+          matrix[i - 1][j - 1] + cost // 置換
+        );
       }
     }
     
-    this._log('標準MIMEタイプをサポートしていません、デフォルトを使用します');
-    return '';  // デフォルトを使用
+    const distance = matrix[len1][len2];
+    const maxLen = Math.max(len1, len2);
+    
+    // 類似度を0〜1の範囲で返す（1が完全一致）
+    return maxLen === 0 ? 1 : 1 - distance / maxLen;
   }
   
   /**
-   * 音声認識の開始
-   * @param {Function} onInterimResult 中間結果のコールバック
-   * @param {Function} onFinalResult 最終結果のコールバック
-   * @param {Function} onError エラー時のコールバック
+   * Web Speech API のエラーハンドリング
    */
-  async startListening(onInterimResult, onFinalResult, onError) {
-    if (this.isListening) return;
+  _handleSpeechRecognitionError(event) {
+    this._log('Web Speech認識エラー:', event);
     
-    this.isListening = true;
-    this.audioChunks = [];
-    this.webSpeechResult = null;
-    this.recordingStartTime = Date.now();
+    // エラー情報の整形
+    const errorInfo = {
+      error: event.error,
+      message: event.message || this._getErrorMessage(event.error),
+      engine: 'webSpeech',
+      originalError: event
+    };
     
-    try {
-      // マイク入力の取得
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        .catch(err => {
-          if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-            throw new Error('マイクの使用許可が得られませんでした');
-          } else {
-            throw err;
-          }
-        });
-      
-      // Web Speech API のセットアップ
-      if (this.webSpeechSupported && this.webSpeechRecognition) {
-        // 中間結果ハンドラ
-        this.webSpeechRecognition.onresult = (event) => {
-          // 複数の結果を正しく処理
-          let finalTranscript = '';
-          let interimTranscript = '';
-          
-          // 全ての結果をループ処理
-          for (let i = 0; i < event.results.length; i++) {
-            const result = event.results[i];
-            const transcript = result[0].transcript;
-            
-            if (result.isFinal) {
-              finalTranscript += transcript;
-            } else {
-              interimTranscript += transcript;
-            }
-          }
-          
-          // 中間結果がある場合は修正して通知
-          if (interimTranscript && onInterimResult) {
-            const correctedInterim = this._correctText(interimTranscript);
-            onInterimResult(correctedInterim);
-          }
-          
-          // 最終結果がある場合は処理
-          if (finalTranscript) {
-            // 最終結果にも幼稚園特化の修正を適用
-            const correctedFinal = this._correctText(finalTranscript);
-            
-            // Web Speech API の結果を保存
-            this.webSpeechResult = {
-              text: correctedFinal,
-              original: finalTranscript,
-              confidence: this._calculateConfidence(finalTranscript, correctedFinal),
-              engine: 'web-speech',
-              timestamp: Date.now()
-            };
-            
-            // Whisper の結果を待たずにまず Web Speech の結果を通知
-            if (onFinalResult && correctedFinal) {
-              onFinalResult(this.webSpeechResult);
-            }
-          }
-        };
-        
-        // エラーハンドラ
-        this.webSpeechRecognition.onerror = (event) => {
-          this._error('Web Speech APIエラー:', event.error);
-          // エラーを通知するが認識を停止しない（Whisperバックアップへ）
-          if (onError) {
-            onError({ 
-              error: event.error, 
-              engine: 'web-speech'
-            });
-          }
-        };
-        
-        // 認識終了時のハンドラ
-        this.webSpeechRecognition.onend = () => {
-          this._log('Web Speech API認識終了');
-          
-          // 認識中なら再開（継続的な認識のため）
-          if (this.isListening) {
-            try {
-              this.webSpeechRecognition.start();
-              this._log('Web Speech API再開');
-            } catch (e) {
-              this._error('Web Speech API再開エラー:', e);
-            }
-          }
-        };
-        
-        // Web Speech API開始
+    // 特定のエラーは無視して再起動を試みる
+    const ignorableErrors = ['network', 'aborted', 'no-speech'];
+    if (ignorableErrors.includes(event.error) && this.options.autoRestart && this.isListening) {
+      this._log('無視可能なエラーのため再起動を試みます:', event.error);
+      setTimeout(() => {
         try {
           this.webSpeechRecognition.start();
         } catch (e) {
-          this._error('Web Speech API開始エラー:', e);
-          this.webSpeechSupported = false;
+          this._error('エラー後の再起動に失敗:', e);
         }
-      }
+      }, 1000);
+      return;
+    }
+    
+    // マイク許可エラーの場合はWhisperもエラーになるので通知する
+    if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+      this._notifyError(errorInfo);
+      return;
+    }
+    
+    // その他のエラーはWhisperにフォールバック
+    this._log('Web Speech認識エラーのため、Whisperにフォールバックします');
+    this._useWhisperFallback();
+  }
+  
+  /**
+   * エラーコードからメッセージを取得
+   */
+  _getErrorMessage(errorCode) {
+    const errorMessages = {
+      'aborted': '音声認識が中断されました',
+      'audio-capture': 'オーディオキャプチャに失敗しました',
+      'network': 'ネットワークエラーが発生しました',
+      'no-speech': '音声が検出されませんでした',
+      'not-allowed': 'マイクの使用許可がありません',
+      'permission-denied': 'マイクの使用許可がありません',
+      'service-not-allowed': 'サービスの使用が許可されていません',
+      'bad-grammar': '不正な文法が指定されました',
+      'language-not-supported': '指定された言語はサポートされていません',
+      'no-match': '認識結果が一致しませんでした',
+      'service-unavailable': 'サービスが利用できません'
+    };
+    
+    return errorMessages[errorCode] || `未知のエラー: ${errorCode}`;
+  }
+  
+  /**
+   * MediaRecorder の初期化
+   */
+  _initMediaRecorder(stream) {
+    if (!this._isMediaRecorderSupported()) {
+      this._log('MediaRecorderがサポートされていないか、適切なMIMEタイプがありません');
+      return false;
+    }
+    
+    try {
+      this.mediaRecorder = new MediaRecorder(stream, { mimeType: this.mimeType });
       
-      // サポートされているMIMEタイプを取得
-      const mimeType = this._getSupportedMimeType();
-      
-      // MediaRecorderの設定（Whisper用の音声録音）
-      const recorderOptions = mimeType ? { mimeType } : undefined;
-      
-      try {
-        this.mediaRecorder = new MediaRecorder(this.stream, recorderOptions);
-      } catch (e) {
-        this._error('MediaRecorder初期化エラー、デフォルト設定を使用します:', e);
-        this.mediaRecorder = new MediaRecorder(this.stream);
-      }
-      
-      // データ取得
+      // データ取得イベント
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.audioChunks.push(event.data);
         }
       };
       
-      // 録音終了時の処理
-      this.mediaRecorder.onstop = async () => {
-        try {
-          // 音声データがある場合は処理
-          if (this.audioChunks.length > 0) {
-            // Blobの作成
-            const audioBlob = new Blob(this.audioChunks, { type: this.mediaRecorder.mimeType || 'audio/webm' });
-            
-            // 音声の長さを推定
-            const audioDuration = await this._estimateAudioDuration(audioBlob);
-            this._log(`推定音声長: ${audioDuration}ms`);
-            
-            // 音声の長さに応じて処理を分岐
-            if (audioDuration < this.options.shortUtteranceThreshold) {
-              this._log('短い発話なので Web Speech API の結果を優先');
-              
-              // すでにWeb Speech APIの結果があれば十分
-              if (this.webSpeechResult && this.webSpeechResult.text) {
-                this._log('Web Speech APIの結果を使用');
-              } else {
-                // Web Speech APIの結果がない場合はWhisperを使用
-                this._log('Web Speech APIの結果がないため、Whisperを使用');
-                await this._processWithWhisper(audioBlob, onFinalResult, onError);
-              }
-            } else {
-              // 長い発話はWhisperも使用して比較
-              this._log('長い発話なのでWhisperも使用して最適な結果を選択');
-              await this._processWithWhisper(audioBlob, onFinalResult, onError);
-            }
-          }
-        } catch (error) {
-          this._error('録音終了処理エラー:', error);
-          if (onError) {
-            onError({
-              error: error.message,
-              engine: 'recorder'
-            });
-          }
-        } finally {
-          this.isListening = false;
+      // 録音停止イベント
+      this.mediaRecorder.onstop = () => {
+        this._log('MediaRecorder録音停止');
+        
+        if (this.audioChunks.length === 0) {
+          this._log('録音データがありません');
+          return;
         }
+        
+        const audioBlob = new Blob(this.audioChunks, { type: this.mimeType });
+        this._sendToWhisperApi(audioBlob);
+        
+        // チャンクをクリア
+        this.audioChunks = [];
       };
       
-      // 録音開始（エラーハンドリングを追加）
-      try {
-        this.mediaRecorder.start(1000); // 1秒ごとにデータを取得
-        this._log('MediaRecorder開始');
-      } catch (e) {
-        this._error('MediaRecorder開始エラー:', e);
-        throw e;
-      }
+      // エラーイベント
+      this.mediaRecorder.onerror = (error) => {
+        this._error('MediaRecorderエラー:', error);
+        
+        this._notifyError({
+          error: 'recorder-error',
+          message: 'MediaRecorderエラーが発生しました',
+          engine: 'whisper',
+          originalError: error
+        });
+      };
       
       return true;
     } catch (error) {
-      this._error('音声認識開始エラー:', error);
-      this.isListening = false;
+      this._error('MediaRecorderの初期化に失敗:', error);
       
-      // リソースのクリーンアップ
-      this._cleanupResources();
-      
-      if (onError) {
-        // 特定のエラーを識別
-        if (error.message.includes('許可')) {
-          onError({ 
-            error: 'mic-permission',
-            message: 'マイクの使用許可が必要です',
-            engine: 'system'
-          });
-        } else {
-          onError({ 
-            error: error.message, 
-            engine: 'hybrid'
-          });
-        }
-      }
+      this._notifyError({
+        error: 'recorder-init-failed',
+        message: 'MediaRecorderの初期化に失敗しました',
+        engine: 'whisper',
+        originalError: error
+      });
       
       return false;
     }
   }
   
   /**
-   * 音声認識の停止
+   * Whisper APIにフォールバック
    */
-  stopListening() {
-    if (!this.isListening) return;
-    
-    this._log('音声認識を停止します');
-    
-    // Web Speech API停止
-    if (this.webSpeechSupported && this.webSpeechRecognition) {
-      try {
-        this.webSpeechRecognition.stop();
-        this._log('Web Speech API停止');
-      } catch (e) {
-        this._error('Web Speech API停止エラー:', e);
+  _useWhisperFallback() {
+    // Whisper APIエンドポイントが設定されていなければ終了
+    if (!this.options.whisperApiEndpoint) {
+      this._log('Whisper APIエンドポイントが設定されていないため、フォールバックできません');
+      
+      // Web Speechの結果を採用
+      if (this.lastResult) {
+        this._notifyResult(this.lastResult);
       }
+      
+      return;
     }
     
-    // MediaRecorder停止（状態チェック追加）
-    if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-      try {
-        this.mediaRecorder.stop();
-        this._log('MediaRecorder停止');
-      } catch (e) {
-        this._error('MediaRecorder停止エラー:', e);
+    // マイクストリームがなければ終了
+    if (!this.micStream) {
+      this._log('マイクストリームがないため、Whisperフォールバックできません');
+      
+      // Web Speechの結果を採用
+      if (this.lastResult) {
+        this._notifyResult(this.lastResult);
       }
+      
+      return;
     }
     
-    // リソースのクリーンアップ
-    this._cleanupResources();
-    
-    this.isListening = false;
-  }
-  
-  /**
-   * リソースのクリーンアップ
-   */
-  _cleanupResources() {
-    // MediaStreamの停止
-    if (this.stream) {
-      try {
-        this.stream.getTracks().forEach(track => track.stop());
-        this._log('MediaStream停止');
-      } catch (e) {
-        this._error('MediaStream停止エラー:', e);
-      }
-      this.stream = null;
-    }
-  }
-  
-  /**
-   * 信頼度の計算（より正確な方法）
-   */
-  _calculateConfidence(original, corrected) {
-    // ブラウザ間の差異を考慮した独自の信頼度計算
-    
-    // 1. 文字列の類似度を計算（レーベンシュタイン距離を使用）
-    const similarity = 1 - (this._levenshteinDistance(original, corrected) / 
-                          Math.max(original.length, corrected.length));
-    
-    // 2. 重要キーワードの出現を評価
-    const keyTerms = ['ホザナ', '幼稚園', '入園', '願書', '説明会', '募集'];
-    const keyTermsCount = keyTerms.filter(term => corrected.includes(term)).length;
-    const keyTermsBonus = keyTermsCount * 0.05; // 1キーワードあたり5%ボーナス
-    
-    // 3. 最終的な信頼度スコア（最大1.0）
-    return Math.min(1.0, similarity * 0.7 + keyTermsBonus);
-  }
-  
-  /**
-   * レーベンシュタイン距離の計算
-   */
-  _levenshteinDistance(a, b) {
-    const matrix = [];
-    
-    // 行列の初期化
-    for (let i = 0; i <= b.length; i++) {
-      matrix[i] = [i];
-    }
-    
-    for (let j = 0; j <= a.length; j++) {
-      matrix[0][j] = j;
-    }
-    
-    // 行列の埋め込み
-    for (let i = 1; i <= b.length; i++) {
-      for (let j = 1; j <= a.length; j++) {
-        if (b.charAt(i-1) === a.charAt(j-1)) {
-          matrix[i][j] = matrix[i-1][j-1];
-        } else {
-          matrix[i][j] = Math.min(
-            matrix[i-1][j-1] + 1, // 置換
-            matrix[i][j-1] + 1,   // 挿入
-            matrix[i-1][j] + 1    // 削除
-          );
+    // MediaRecorderが未初期化なら初期化
+    if (!this.mediaRecorder) {
+      const success = this._initMediaRecorder(this.micStream);
+      if (!success) {
+        // Web Speechの結果を採用
+        if (this.lastResult) {
+          this._notifyResult(this.lastResult);
         }
+        
+        return;
       }
     }
     
-    return matrix[b.length][a.length];
+    try {
+      // MediaRecorderが既に録音中なら一旦停止
+      if (this.mediaRecorder.state === 'recording') {
+        this.mediaRecorder.stop();
+        
+        // 新しい録音を開始する前に少し待つ
+        setTimeout(() => {
+          this.audioChunks = [];
+          this.mediaRecorder.start();
+        }, 100);
+        
+        return;
+      }
+      
+      // 新しい録音を開始
+      this.audioChunks = [];
+      this.mediaRecorder.start();
+      
+      // 5秒後に録音を停止（音声長の制限）
+      setTimeout(() => {
+        if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+          this._log('Whisper用の録音を停止します（タイムアウト）');
+          this.mediaRecorder.stop();
+        }
+      }, 5000);
+    } catch (error) {
+      this._error('Whisperフォールバック録音の開始に失敗:', error);
+      
+      // Web Speechの結果を採用
+      if (this.lastResult) {
+        this._notifyResult(this.lastResult);
+      }
+    }
   }
   
   /**
-   * WhisperAPIでの処理
+   * Whisper APIに音声データを送信
    */
-  async _processWithWhisper(audioBlob, onFinalResult, onError) {
+  async _sendToWhisperApi(audioBlob) {
+    if (!this.options.whisperApiEndpoint) {
+      this._log('Whisper APIエンドポイントが設定されていません');
+      return;
+    }
+    
+    this.isProcessing = true;
+    
     try {
-      this._log('Whisper APIで処理開始');
-      
-      // 音声データのサイズチェック
-      if (audioBlob.size > this.options.maxAudioSize) {
-        this._log(`音声データが大きすぎます (${(audioBlob.size / 1024 / 1024).toFixed(2)}MB)`);
-        // 大きすぎる場合は圧縮・リサンプリングが必要だが、ここでは簡易的にエラー処理
-        throw new Error('音声データが大きすぎます (8MB制限)');
-      }
-      
-      // Blobをbase64に変換
+      // Blobデータをbase64エンコード
       const base64Audio = await this._blobToBase64(audioBlob);
       
-      // APIエンドポイントのURL構築（相対パスから絶対パスへ）
-      const apiUrl = new URL(
-        this.options.whisperApiEndpoint,
-        window.location.origin
-      ).toString();
+      // 音声の長さを推定
+      const audioDuration = await this._estimateAudioDuration(audioBlob);
+      this._log(`音声データ: ${(audioBlob.size / 1024).toFixed(2)} KB, 推定時間: ${(audioDuration / 1000).toFixed(2)}秒`);
       
-      // APIリクエスト
-      const response = await fetch(apiUrl, {
+      // 短すぎる音声は処理しない（ノイズ防止）
+      if (audioDuration < 300) { // 300ms未満
+        this._log('音声が短すぎるため、処理をスキップします');
+        this.isProcessing = false;
+        
+        // Web Speechの結果を採用
+        if (this.lastResult) {
+          this._notifyResult(this.lastResult);
+        }
+        
+        return;
+      }
+      
+      // Whisper APIにリクエスト
+      const response = await fetch(this.options.whisperApiEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           audio: base64Audio,
-          format: audioBlob.type || 'audio/webm'
+          language: this.options.language.split('-')[0],
+          mimeType: this.mimeType
         })
       });
       
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`API error: ${response.status} - ${errorData.error || 'Unknown error'}`);
+        throw new Error(`Whisper APIエラー: ${response.status} ${response.statusText}`);
       }
       
       const data = await response.json();
       
-      if (data.success && data.text) {
-        // 幼稚園特化の修正を適用
-        const correctedText = this._correctText(data.text);
-        
-        // 信頼度を計算（固定値ではなく）
-        const confidence = this._calculateConfidence(data.text, correctedText);
-        
-        const whisperResult = {
-          text: correctedText,
-          original: data.text,
-          confidence: confidence,
-          engine: 'whisper',
-          timestamp: Date.now()
-        };
-        
-        // Web Speech API と Whisper の結果を比較
-        const bestResult = await this._compareAndSelectBestResult(
-          this.webSpeechResult,
-          whisperResult
-        );
-        
-        // 最適な結果を通知
-        if (onFinalResult && bestResult.text) {
-          // Web Speechと同じ結果を返さないようにする
-          if (!this.webSpeechResult || 
-              (this.webSpeechResult.text !== bestResult.text &&
-               bestResult.timestamp !== this.webSpeechResult.timestamp)) {
-            onFinalResult(bestResult);
-          }
-        }
-      } else {
-        throw new Error(data.error || 'Unknown error');
+      if (!data.text) {
+        throw new Error('Whisper APIから空のレスポンスが返されました');
       }
-    } catch (error) {
-      this._error('Whisper処理エラー:', error);
       
-      if (onError) {
-        onError({ 
-          error: error.message, 
-          engine: 'whisper'
+      // レスポンスの処理
+      const correctedText = this._correctText(data.text);
+      
+      // 信頼性スコアの計算（Whisperは返さないので独自に計算）
+      this.confidenceScores.whisper = this._calculateWhisperConfidence(
+        correctedText, audioDuration
+      );
+      
+      const whisperResult = {
+        text: correctedText,
+        engine: 'whisper',
+        confidence: this.confidenceScores.whisper,
+        timestamp: Date.now()
+      };
+      
+      // Web Speech結果とWhisper結果を比較し、より良い方を採用
+      this._selectBestResult(whisperResult);
+    } catch (error) {
+      this._error('Whisper API処理エラー:', error);
+      
+      // エラー通知
+      this._notifyError({
+        error: 'whisper-api-error',
+        message: 'Whisper API処理中にエラーが発生しました',
+        engine: 'whisper',
+        originalError: error
+      });
+      
+      // Web Speechの結果を採用
+      if (this.lastResult) {
+        this._notifyResult(this.lastResult);
+      }
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+  
+  /**
+   * Whisperの信頼性スコアを計算
+   */
+  _calculateWhisperConfidence(text, duration) {
+    if (!text) return 0;
+    
+    // テキストの長さに基づくスコア
+    const textLength = text.length;
+    let lengthScore = 0;
+    
+    if (textLength < 3) {
+      lengthScore = 0.2; // 非常に短いテキストは低信頼性
+    } else if (textLength < 10) {
+      lengthScore = 0.5; // 短いテキストは中程度の信頼性
+    } else if (textLength < 50) {
+      lengthScore = 0.8; // 適切な長さは高信頼性
+    } else {
+      lengthScore = 0.7; // 長すぎるテキストはやや減点
+    }
+    
+    // 音声の長さに基づくスコア
+    const durationSec = duration / 1000;
+    let durationScore = 0;
+    
+    if (durationSec < 0.5) {
+      durationScore = 0.3; // 非常に短い音声は低信頼性
+    } else if (durationSec < 1.0) {
+      durationScore = 0.5; // 短い音声は中程度の信頼性
+    } else if (durationSec < 5.0) {
+      durationScore = 0.8; // 適切な長さは高信頼性
+    } else {
+      durationScore = 0.6; // 長すぎる音声はやや減点
+    }
+    
+    // 優先キーワードボーナス
+    const textLower = text.toLowerCase();
+    const keywordBonus = this.priorityKeywords.some(keyword => 
+      textLower.includes(keyword.toLowerCase())
+    ) ? 0.15 : 0;
+    
+    // 最終スコアの計算（0〜1の範囲に収める）
+    const finalScore = Math.min(Math.max(
+      (lengthScore * 0.5 + durationScore * 0.5) + keywordBonus, 0
+    ), 1);
+    
+    this._log(`Whisper信頼性スコア計算: length=${lengthScore.toFixed(2)}, duration=${durationScore.toFixed(2)}, keyword=${keywordBonus.toFixed(2)} => ${finalScore.toFixed(2)}`);
+    
+    return finalScore;
+  }
+  
+  /**
+   * Web SpeechとWhisperの結果を比較し、より良い方を選択
+   */
+  _selectBestResult(whisperResult) {
+    // Web Speechの結果がなければWhisperを採用
+    if (!this.lastResult) {
+      this._notifyResult(whisperResult);
+      return;
+    }
+    
+    const webSpeechConfidence = this.confidenceScores.webSpeech;
+    const whisperConfidence = this.confidenceScores.whisper;
+    
+    // 時間差が大きい場合は最新の結果を優先
+    const timeDiff = Math.abs(whisperResult.timestamp - this.lastResult.timestamp);
+    if (timeDiff > 5000) { // 5秒以上の差
+      this._log('時間差が大きいため、最新の結果を採用します');
+      this._notifyResult(whisperResult);
+      return;
+    }
+    
+    // 信頼性スコアを比較
+    if (whisperConfidence > webSpeechConfidence + 0.1) {
+      // Whisperが明らかに良い
+      this._log(`Whisperの結果を採用: ${whisperConfidence.toFixed(2)} > ${webSpeechConfidence.toFixed(2)}`);
+      this._notifyResult(whisperResult);
+    } else {
+      // Web Speechが同等以上
+      this._log(`Web Speechの結果を採用: ${webSpeechConfidence.toFixed(2)} >= ${whisperConfidence.toFixed(2)}`);
+      this._notifyResult(this.lastResult);
+    }
+  }
+  
+  /**
+   * 最終結果を通知
+   */
+  _notifyResult(result) {
+    if (this.resultCallbacks.final) {
+      this.resultCallbacks.final(result);
+    }
+  }
+  
+  /**
+   * エラーを通知
+   */
+  _notifyError(error) {
+    if (this.resultCallbacks.error) {
+      this.resultCallbacks.error(error);
+    }
+  }
+  
+  /**
+   * 音声認識の開始
+   * @param {function} interimCallback - 中間結果のコールバック
+   * @param {function} finalCallback - 最終結果のコールバック
+   * @param {function} errorCallback - エラー発生時のコールバック
+   */
+  startListening(interimCallback, finalCallback, errorCallback) {
+    // 既にリスニング中なら何もしない
+    if (this.isListening) {
+      this._log('既にリスニング中です');
+      return;
+    }
+    
+    this.isListening = true;
+    this.audioChunks = [];
+    this.resultCallbacks = {
+      interim: interimCallback,
+      final: finalCallback,
+      error: errorCallback
+    };
+    
+    // マイクへのアクセス要求
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then((stream) => {
+        this.micStream = stream;
+        
+        // Web Speech API の初期化
+        if (this._isSpeechRecognitionSupported()) {
+          const success = this._initWebSpeechRecognition();
+          
+          if (success) {
+            try {
+              this.webSpeechRecognition.start();
+              this._log('Web Speech認識を開始しました');
+            } catch (error) {
+              this._error('Web Speech認識の開始に失敗:', error);
+            }
+          }
+        } else {
+          this._log('Web Speech APIがサポートされていないため、Whisperのみを使用します');
+        }
+        
+        // MediaRecorder の初期化（Whisper API用）
+        if (this.options.whisperApiEndpoint) {
+          this._initMediaRecorder(stream);
+        }
+      })
+      .catch((error) => {
+        this.isListening = false;
+        this._error('マイクアクセスエラー:', error);
+        
+        // エラー通知
+        this._notifyError({
+          error: 'mic-permission',
+          message: 'マイクへのアクセス許可がありません',
+          engine: 'system',
+          originalError: error
         });
+      });
+  }
+  
+  /**
+   * 音声認識の停止
+   */
+  stopListening() {
+    // リスニング中でなければ何もしない
+    if (!this.isListening) {
+      this._log('リスニング中ではありません');
+      return;
+    }
+    
+    this.isListening = false;
+    
+    // Web Speech API の停止
+    if (this.webSpeechRecognition) {
+      try {
+        this.webSpeechRecognition.stop();
+        this._log('Web Speech認識を停止しました');
+      } catch (error) {
+        this._error('Web Speech認識の停止に失敗:', error);
       }
     }
-  }
-  
-  /**
-   * 両方のエンジン結果を比較して最適なものを選択
-   */
-  async _compareAndSelectBestResult(webSpeechResult, whisperResult) {
-    // どちらかが null の場合は他方を返す
-    if (!webSpeechResult) return whisperResult;
-    if (!whisperResult) return webSpeechResult;
     
-    // 「ホザナ」を含むかどうかチェック
-    const webSpeechHasHosana = /ホザナ|ほざな|ほさな|ホサナ/i.test(webSpeechResult.text);
-    const whisperHasHosana = /ホザナ|ほざな|ほさな|ホサナ/i.test(whisperResult.text);
-    
-    // 「ホザナ」を含む方を優先
-    if (webSpeechHasHosana && !whisperHasHosana) {
-      return webSpeechResult;
-    } else if (!webSpeechHasHosana && whisperHasHosana) {
-      return whisperResult;
+    // MediaRecorder の停止
+    if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+      try {
+        this.mediaRecorder.stop();
+        this._log('MediaRecorderを停止しました');
+      } catch (error) {
+        this._error('MediaRecorderの停止に失敗:', error);
+      }
     }
     
-    // 「幼稚園」を含むかどうかチェック
-    const webSpeechHasKindergarten = /幼稚園/i.test(webSpeechResult.text);
-    const whisperHasKindergarten = /幼稚園/i.test(whisperResult.text);
-    
-    // 「幼稚園」を含む方を優先
-    if (webSpeechHasKindergarten && !whisperHasKindergarten) {
-      return webSpeechResult;
-    } else if (!webSpeechHasKindergarten && whisperHasKindergarten) {
-      return whisperResult;
+    // マイクストリームの停止
+    if (this.micStream) {
+      try {
+        this.micStream.getTracks().forEach(track => track.stop());
+        this._log('マイクストリームを停止しました');
+      } catch (error) {
+        this._error('マイクストリームの停止に失敗:', error);
+      }
+      
+      this.micStream = null;
     }
     
-    // 入園関連の重要単語をチェック
-    const keyTerms = ['入園', '願書', '申し込み', '募集', '見学', '説明会'];
-    const webSpeechTermCount = keyTerms.filter(term => webSpeechResult.text.includes(term)).length;
-    const whisperTermCount = keyTerms.filter(term => whisperResult.text.includes(term)).length;
-    
-    if (webSpeechTermCount > whisperTermCount) {
-      return webSpeechResult;
-    } else if (whisperTermCount > webSpeechTermCount) {
-      return whisperResult;
-    }
-    
-    // その他の場合は信頼度で判断
-    return (webSpeechResult.confidence >= whisperResult.confidence) ? 
-           webSpeechResult : whisperResult;
-  }
-  
-  /**
-   * BlobをBase64に変換
-   */
-  _blobToBase64(blob) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        // "data:audio/webm;base64," を除去
-        const base64 = reader.result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    // 変数のクリア
+    this.audioChunks = [];
+    this.lastResult = null;
   }
   
   /**
@@ -695,7 +815,23 @@ class HybridVoiceRecognition {
     
     let corrected = text;
     
-    // 「ホザナ」の特別処理（最優先）
+    // 「願書」の特別処理（最優先）
+    const ganshoPriority = [
+      /眼症/g, /がんしょう/g, /がんしょ/g, /顔書/g, /顔症/g, 
+      /眼書/g, /元書/g, /限症/g, /眼上/g, /願症/g
+    ];
+    
+    // 入園関連のキーワードが近くにあるかチェック
+    const hasEnrollmentContext = /入園|出願|申し込み|提出|書類|手続き|入学|募集|受付|必要|入園の|用紙|資料|請求/i.test(corrected);
+    
+    // 入園関連の文脈がある場合、または単独で「眼症」などが出てきた場合
+    if (hasEnrollmentContext || ganshoPriority.some(pattern => pattern.test(corrected))) {
+      for (const pattern of ganshoPriority) {
+        corrected = corrected.replace(pattern, '願書');
+      }
+    }
+    
+    // 「ホザナ」の特別処理
     // ホザナに似た発音のパターンを検出して置換
     const hosanaPatterns = [
       /[ほホ][うウゥーさザ][なナざザ][なナ]?/gi,
@@ -710,6 +846,16 @@ class HybridVoiceRecognition {
     // 文中に「幼稚園」が出てきて園の名前がない場合、「ホザナ幼稚園」に補完
     if (/幼稚園/gi.test(corrected) && !(/ホザナ/gi.test(corrected))) {
       corrected = corrected.replace(/幼稚園/gi, 'ホザナ幼稚園');
+    }
+    
+    // 「〜が欲しい」や「〜はどこ」などの表現で「願書」のコンテキストを検出
+    if (/[がは](欲しい|ほしい|どこ|どれ|必要)/i.test(corrected)) {
+      corrected = corrected.replace(/眼症|がんしょう|がんしょ|顔書|顔症/gi, '願書');
+    }
+    
+    // 「〜行ったらいい」などの質問形式での文脈でも「願書」に修正
+    if (/行った(ら|方が)いい|行け(ば|ます)|もらえ(る|ます)|入手/i.test(corrected)) {
+      corrected = corrected.replace(/眼症|がんしょう|がんしょ|顔書|顔症/gi, '願書');
     }
     
     // 形態素解析が利用可能な場合は、より精密な修正を適用
@@ -749,6 +895,11 @@ class HybridVoiceRecognition {
     
     // ひらがなだけの「ようちえん」を「幼稚園」に変換
     corrected = corrected.replace(/ようちえん/g, '幼稚園');
+    
+    // 最終的なログ出力（デバッグ用）
+    if (this.options.debug && corrected !== text) {
+      this._log(`テキスト修正: "${text}" → "${corrected}"`);
+    }
     
     return corrected;
   }
@@ -833,6 +984,22 @@ class HybridVoiceRecognition {
         const durationEstimate = audioBlob.size / 16000;
         resolve(durationEstimate);
       }, 10000);
+    });
+  }
+  
+  /**
+   * BlobをBase64に変換
+   */
+  _blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // "data:audio/webm;base64," を除去
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
     });
   }
   
