@@ -1,344 +1,505 @@
-﻿<script>
-  // 音声サポート切り替え
-  document.addEventListener('DOMContentLoaded', function() {
-    const toggleButton = document.getElementById('voice-support-toggle');
-    const toggleHelpText = document.getElementById('toggle-help-text');
-    const voiceSupportContainer = document.getElementById('voice-support');
-    
-    // 音声入力インスタンス保持用
-    let voiceInput = null;
-    
-    // SingleMicVoiceInput クラス定義（フォールバック用）
-    class SingleMicVoiceInput {
-      constructor({ containerId, apiEndpoint, language = 'ja-JP', onResult }) {
-        this.container = document.getElementById(containerId);
-        this.onResult = onResult || function() {};
-        this.language = language;
-        this.isRecording = false;
-        this.isProcessing = false;
-        this.stream = null;
-        this.recorder = null;
-        this.chunks = [];
-        
-        // UIの初期化
-        this._initUI();
-      }
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8"/>
+  <title>ホザナ幼稚園 音声サポート</title>
+  <!-- 既存のCSSやメタタグがあればここに保持 -->
+  <style>
+    /* トグル状態に応じたコンテナ表示制御 */
+    #voice-support:not(.active) ~ #voice-input-container { display: block; }
+    #voice-support.active ~ #voice-input-container { display: none; }
+    /* トグルヘルプテキストの表示制御 */
+    #voice-support.active ~ #toggle-help-text { display: none; }
+    #voice-support:not(.active) ~ #toggle-help-text { display: block; }
+    .voice-status { 
+      margin: 10px 0; 
+      font-size: 16px; 
+      color: #333; 
+    }
+    .voice-status.error { color: #d32f2f; }
+    .voice-button {
+      padding: 10px 20px;
+      font-size: 18px;
+      cursor: pointer;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+    }
+    .voice-button.listening {
+      background-color: #d32f2f;
+    }
+  </style>
+</head>
+<body>
+  <!-- トグル用コンテナ -->
+  <div id="voice-support"></div>
+  
+  <!-- 汎用ステータス表示 -->
+  <div id="status" class="voice-status">🎤 音声認識は停止しています</div>
+  
+  <!-- 認識結果 -->
+  <div id="recognized"></div>
+  
+  <!-- インライン説明 -->
+  <div id="toggle-help-text">🎤をクリックしてお話しください</div>
+  
+  <!-- トグルボタン -->
+  <button id="voice-support-toggle">🎤</button>
+  
+  <!-- PrecisionVoiceInputの本体UI（トグルオフ時の簡易入力用） -->
+  <div id="voice-input-container"></div>
+
+  <!-- トグルロジック -->
+  <script>
+    // 音声サポート切り替え
+    document.addEventListener('DOMContentLoaded', function() {
+      const toggleButton = document.getElementById('voice-support-toggle');
+      const toggleHelpText = document.getElementById('toggle-help-text');
+      const voiceSupportContainer = document.getElementById('voice-support');
+      const voiceInputContainer = document.getElementById('voice-input-container');
       
-      _initUI() {
-        // ボタンとステータス表示を維持
-        this.status = document.getElementById('status');
-        if (this.status) {
-          this.status.textContent = 'フォールバックモードで音声入力を準備中です...';
-        }
-      }
+      // 音声入力インスタンス保持用
+      let voiceInput = null;
       
-      async start() {
-        if (this.isRecording || this.isProcessing) return;
-        
-        this.isProcessing = true;
-        if (this.status) {
-          this.status.textContent = 'マイクを準備中...';
-        }
-        
-        try {
-          // マイクアクセス
-          this.stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true
-            }
-          });
-          
-          // MediaRecorder初期化
-          const mimeType = 'audio/webm;codecs=opus';
-          this.recorder = new MediaRecorder(
-            this.stream, 
-            MediaRecorder.isTypeSupported(mimeType) ? { mimeType } : undefined
-          );
-          
+      // SingleMicVoiceInput クラス定義（フォールバック用）
+      class SingleMicVoiceInput {
+        constructor({ containerId, apiEndpoint, language = 'ja-JP', onResult }) {
+          this.container = document.getElementById(containerId);
+          this.onResult = onResult || function() {};
+          this.language = language;
+          this.isRecording = false;
+          this.isProcessing = false;
+          this.stream = null;
+          this.recorder = null;
           this.chunks = [];
-          this.recorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-              this.chunks.push(e.data);
-            }
-          };
           
-          this.recorder.onstop = () => {
-            this._processRecording();
-          };
-          
-          // 録音開始
-          this.recorder.start();
-          this.isRecording = true;
-          this.isProcessing = false;
-          
-          // UIの更新
+          // UIの初期化
+          this._initUI();
+        }
+        
+        _initUI() {
+          // 汎用ステータス要素を使用
+          this.status = document.getElementById('status');
           if (this.status) {
-            this.status.textContent = '🎤 録音中... (お話しください)';
+            this.status.textContent = 'フォールバックモードで音声入力を準備中です...';
           }
           
-          // 30秒で自動停止
-          this.maxRecordingTimer = setTimeout(() => {
-            if (this.isRecording) {
-              this.stop();
-            }
-          }, 30000);
+          // 簡易ボタンを描画
+          this.container.innerHTML = '';
+          this.button = document.createElement('button');
+          this.button.className = 'voice-button';
+          this.button.setAttribute('aria-label', '音声入力を開始');
+          this.button.textContent = '🎤';
+          this.container.appendChild(this.button);
           
-          console.log('フォールバックモードで録音開始');
-          
-        } catch (error) {
-          console.error('マイクアクセスエラー:', error);
-          this.isProcessing = false;
-          if (this.status) {
-            this.status.textContent = 'マイクへのアクセスに失敗しました。権限を確認してください。';
+          // ボタンクリックハンドラ
+          this._boundClick = this._handleButtonClick.bind(this);
+          this.button.addEventListener('click', this._boundClick);
+        }
+        
+        _handleButtonClick() {
+          if (this.isRecording) {
+            this.stop();
+          } else {
+            this.start();
           }
         }
-      }
-      
-      stop() {
-        if (!this.isRecording) return;
         
-        this.isRecording = false;
-        if (this.status) {
-          this.status.textContent = '処理中...';
-        }
-        
-        // タイマークリア
-        if (this.maxRecordingTimer) {
-          clearTimeout(this.maxRecordingTimer);
-          this.maxRecordingTimer = null;
-        }
-        
-        // 録音停止
-        if (this.recorder && this.recorder.state === 'recording') {
+        async start() {
+          if (this.isRecording || this.isProcessing) return;
+          
+          this.isProcessing = true;
+          if (this.status) {
+            this.status.textContent = 'マイクを準備中...';
+          }
+          
           try {
-            this.recorder.stop();
-          } catch (e) {
-            console.warn('録音停止エラー:', e);
+            // マイクアクセス
+            this.stream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+              }
+            });
+            
+            // MediaRecorder初期化
+            const mimeType = 'audio/webm;codecs=opus';
+            this.recorder = new MediaRecorder(
+              this.stream, 
+              MediaRecorder.isTypeSupported(mimeType) ? { mimeType } : undefined
+            );
+            
+            this.chunks = [];
+            this.recorder.ondataavailable = (e) => {
+              if (e.data.size > 0) {
+                this.chunks.push(e.data);
+              }
+            };
+            
+            this.recorder.onstop = () => {
+              this._processRecording();
+            };
+            
+            // 録音開始
+            this.recorder.start();
+            this.isRecording = true;
+            this.isProcessing = false;
+            
+            // UIの更新
+            if (this.status) {
+              this.status.textContent = '🎤 録音中... (お話しください)';
+            }
+            if (this.button) {
+              this.button.classList.add('listening');
+              this.button.setAttribute('aria-label', '音声入力を停止');
+            }
+            
+            // 30秒で自動停止
+            this.maxRecordingTimer = setTimeout(() => {
+              if (this.isRecording) {
+                this.stop();
+              }
+            }, 30000);
+            
+            console.log('フォールバックモードで録音開始');
+            
+          } catch (error) {
+            console.error('マイクアクセスエラー:', error);
+            this.isProcessing = false;
+            if (this.status) {
+              this.status.textContent = 'マイクへのアクセスに失敗しました。権限を確認してください。';
+            }
+          }
+        }
+        
+        stop() {
+          if (!this.isRecording) return;
+          
+          this.isRecording = false;
+          if (this.status) {
+            this.status.textContent = '処理中...';
+          }
+          if (this.button) {
+            this.button.classList.remove('listening');
+            this.button.setAttribute('aria-label', '音声入力を開始');
+          }
+          
+          // タイマークリア
+          if (this.maxRecordingTimer) {
+            clearTimeout(this.maxRecordingTimer);
+            this.maxRecordingTimer = null;
+          }
+          
+          // 録音停止
+          if (this.recorder && this.recorder.state === 'recording') {
+            try {
+              this.recorder.stop();
+            } catch (e) {
+              console.warn('録音停止エラー:', e);
+              this._cleanupResources();
+            }
+          } else {
             this._cleanupResources();
           }
-        } else {
-          this._cleanupResources();
-        }
-      }
-      
-      async _processRecording() {
-        if (this.chunks.length === 0) {
-          this._cleanupResources();
-          if (this.status) {
-            this.status.textContent = '録音データがありません。もう一度お試しください。';
-          }
-          return;
         }
         
-        try {
-          const blob = new Blob(this.chunks, { type: 'audio/webm' });
-          
-          // リソース解放（早めに）
-          this._cleanupResources();
-          
-          if (this.status) {
-            this.status.textContent = '音声認識中...';
+        async _processRecording() {
+          if (this.chunks.length === 0) {
+            this._cleanupResources();
+            if (this.status) {
+              this.status.textContent = '録音データがありません。もう一度お試しください。';
+            }
+            return;
           }
           
-          // 音声をBase64エンコード
-          const arrayBuffer = await blob.arrayBuffer();
-          const base64Data = btoa(
-            new Uint8Array(arrayBuffer).reduce(
-              (data, byte) => data + String.fromCharCode(byte), ''
-            )
-          );
-          
-          // STTリクエスト送信（client.jsと同様のエンドポイント）
-          const response = await fetch('/.netlify/functions/stt', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              audio: base64Data,
-              format: 'audio/webm'
-            })
-          });
-          
-          if (!response.ok) {
-            throw new Error(`サーバーエラー: ${response.status}`);
+          try {
+            const blob = new Blob(this.chunks, { type: 'audio/webm' });
+            
+            // リソース解放（早めに）
+            this._cleanupResources();
+            
+            if (this.status) {
+              this.status.textContent = '音声認識中...';
+            }
+            
+            // 音声をBase64エンコード
+            const arrayBuffer = await blob.arrayBuffer();
+            const base64Data = btoa(
+              new Uint8Array(arrayBuffer).reduce(
+                (data, byte) => data + String.fromCharCode(byte), ''
+              )
+            );
+            
+            // STTリクエスト送信
+            const response = await fetch('/.netlify/functions/stt', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                audio: base64Data,
+                format: 'audio/webm'
+              })
+            });
+            
+            if (!response.ok) {
+              throw new Error(`サーバーエラー: ${response.status}`);
+            }
+            
+            const result = await response.json();
+            let recognizedText = '';
+            
+            // レスポンス形式の判定
+            if (result.text && typeof result.text === 'string') {
+              recognizedText = result.text;
+            } else if (result.stt && result.stt.text) {
+              recognizedText = result.stt.text;
+            } else {
+              throw new Error('認識結果が見つかりません');
+            }
+            
+            // テキスト処理
+            recognizedText = recognizedText
+              .replace(/【質問】|【回答】|【応答】|【返答】/g, '')
+              .replace(/[【\[［][^】\]］]*[】\]］]/g, '')
+              .trim();
+            
+            // 結果コールバック呼び出し
+            this.onResult(recognizedText);
+            
+            if (this.status) {
+              this.status.textContent = '認識完了';
+            }
+            
+          } catch (error) {
+            console.error('音声処理エラー:', error);
+            if (this.status) {
+              this.status.textContent = `エラーが発生しました: ${error.message}`;
+            }
+          }
+        }
+        
+        _cleanupResources() {
+          // タイマークリア
+          if (this.maxRecordingTimer) {
+            clearTimeout(this.maxRecordingTimer);
+            this.maxRecordingTimer = null;
           }
           
-          const result = await response.json();
-          let recognizedText = '';
+          // レコーダー解放
+          this.recorder = null;
+          this.chunks = [];
           
-          // レスポンス形式の判定
-          if (result.text && typeof result.text === 'string') {
-            recognizedText = result.text;
-          } else if (result.stt && result.stt.text) {
-            recognizedText = result.stt.text;
+          // マイクストリーム解放
+          if (this.stream) {
+            this.stream.getTracks().forEach(track => track.stop());
+            this.stream = null;
+          }
+          
+          this.isProcessing = false;
+        }
+        
+        dispose() {
+          if (this.isRecording) {
+            this.stop();
           } else {
-            throw new Error('認識結果が見つかりません');
+            this._cleanupResources();
           }
           
-          // テキスト処理
-          recognizedText = recognizedText
-            .replace(/【質問】|【回答】|【応答】|【返答】/g, '')
-            .replace(/[【\[［][^】\]］]*[】\]］]/g, '')
-            .trim();
-          
-          // 結果コールバック呼び出し
-          this.onResult(recognizedText);
-          
+          if (this.button) {
+            this.button.removeEventListener('click', this._boundClick);
+            this.button = null;
+          }
+          if (this.container) {
+            this.container.innerHTML = '';
+          }
           if (this.status) {
-            this.status.textContent = '認識完了';
-          }
-          
-        } catch (error) {
-          console.error('音声処理エラー:', error);
-          if (this.status) {
-            this.status.textContent = `エラーが発生しました: ${error.message}`;
+            this.status.textContent = '音声入力は停止しています';
           }
         }
       }
       
-      _cleanupResources() {
-        // タイマークリア
-        if (this.maxRecordingTimer) {
-          clearTimeout(this.maxRecordingTimer);
-          this.maxRecordingTimer = null;
+      // 音声認識結果の処理
+      function handleVoiceResult(transcript) {
+        console.log('音声認識結果:', transcript);
+        
+        // 認識結果を表示
+        const recognizedElement = document.getElementById('recognized');
+        if (recognizedElement) {
+          recognizedElement.textContent = `お問合せ内容: ${transcript}`;
         }
         
-        // レコーダー解放
-        this.recorder = null;
-        this.chunks = [];
-        
-        // マイクストリーム解放
-        if (this.stream) {
-          this.stream.getTracks().forEach(track => track.stop());
-          this.stream = null;
+        // 既存のAI処理関数を使用
+        if (window.handleAI && typeof window.handleAI === 'function') {
+          window.handleAI(transcript);
         }
-        
-        this.isProcessing = false;
       }
       
-      dispose() {
-        if (this.isRecording) {
-          this.stop();
-        } else {
-          this._cleanupResources();
-        }
-        
-        if (this.status) {
-          this.status.textContent = '音声入力は停止しています';
-        }
-      }
-    }
-    
-    // 音声認識結果の処理
-    function handleVoiceResult(transcript) {
-      console.log('音声認識結果:', transcript);
-      
-      // 認識結果を表示
-      const recognizedElement = document.getElementById('recognized');
-      if (recognizedElement) {
-        recognizedElement.textContent = `お問合せ内容: ${transcript}`;
-      }
-      
-      // 既存のAI処理関数を使用
-      if (window.handleAI && typeof window.handleAI === 'function') {
-        window.handleAI(transcript);
-      }
-    }
-    
-    // 動的import()で音声モジュールを読み込む
-    async function loadVoiceModule() {
-      try {
-        // ESモジュールとして動的に読み込み
-        const module = await import('./precision-voice-input.js');
-        return module.default; // デフォルトエクスポートを取得
-      } catch (error) {
-        console.warn('精度優先音声モジュールの読み込みに失敗:', error);
-        return SingleMicVoiceInput; // フォールバッククラスを返す
-      }
-    }
-    
-    // トグルボタンのイベントリスナー
-    toggleButton.addEventListener('click', async function() {
-      const isActive = voiceSupportContainer.classList.contains('active');
-      
-      if (isActive) {
-        // 音声サポートをオフにする
-        voiceSupportContainer.classList.remove('active');
-        toggleButton.textContent = '🎤';
-        toggleHelpText.textContent = '🎤をクリックしてお話しください';
-        
-        // 音声入力を停止・破棄
-        if (voiceInput) {
-          voiceInput.dispose();
-          voiceInput = null;
-        }
-        
-        // 他の音声を停止
-        stopAllAudio();
-        
-        // 状態をリセット
-        window.voiceSupportActive = false;
-        
-        const statusElement = document.getElementById('status');
-        if (statusElement) {
-          statusElement.textContent = '🎤 音声認識は停止しています';
-        }
-        
-        console.log('音声サポートを停止しました');
-      } else {
-        // 音声サポートをオンにする
-        voiceSupportContainer.classList.add('active');
-        toggleButton.textContent = '✕';
-        toggleHelpText.textContent = '✕をクリックして音声サポートを終了';
-        
-        // 状態を更新
-        window.voiceSupportActive = true;
-        
-        const statusElement = document.getElementById('status');
-        if (statusElement) {
-          statusElement.textContent = '🎤 音声入力を初期化中...';
-        }
-        
+      // 動的import()で音声モジュールを読み込む
+      async function loadVoiceModule() {
+        // 注意: precision-voice-input.js のパスはプロジェクト構造に応じて調整してください
+        // 例: './js/precision-voice-input.js' や '/scripts/precision-voice-input.js'
         try {
-          // まだ音声入力がなければ初期化
-          if (!voiceInput) {
+          const module = await import('./precision-voice-input.js');
+          // グローバル登録
+          window.PrecisionVoiceInput = module.default;
+          return module.default;
+        } catch (error) {
+          console.warn('精度優先音声モジュールの読み込みに失敗:', error);
+          return SingleMicVoiceInput; // フォールバッククラスを返す
+        }
+      }
+      
+      // トグルオフ時の初期化（ページ読み込み時）
+      async function initializeVoiceInput() {
+        try {
+          const VoiceInputClass = await loadVoiceModule();
+          voiceInput = new VoiceInputClass({
+            containerId: 'voice-input-container',
+            apiEndpoint: '/.netlify/functions/stt',
+            language: 'ja-JP',
+            onResult: handleVoiceResult
+          });
+          // 自動で録音開始（ユーザー操作の簡略化）
+          voiceInput.start();
+        } catch (error) {
+          console.error('初期音声入力初期化エラー:', error);
+          const statusElement = document.getElementById('status');
+          if (statusElement) {
+            statusElement.textContent = '🔇 音声入力の初期化に失敗しました';
+          }
+        }
+      }
+      
+      // トグルボタンのイベントリスナー
+      toggleButton.addEventListener('click', async function() {
+        const isActive = voiceSupportContainer.classList.contains('active');
+        
+        if (isActive) {
+          // 音声サポートをオフにする
+          voiceSupportContainer.classList.remove('active');
+          toggleButton.textContent = '🎤';
+          toggleHelpText.textContent = '🎤をクリックしてお話しください';
+          
+          // 音声入力を停止・破棄
+          if (voiceInput) {
+            voiceInput.dispose();
+            voiceInput = null;
+          }
+          
+          // 他の音声を停止（カスタマイズ例：audio要素の停止）
+          function stopAllAudio() {
+            document.querySelectorAll('audio').forEach(audio => audio.pause());
+          }
+          stopAllAudio();
+          
+          // 状態をリセット
+          window.voiceSupportActive = false;
+          
+          const statusElement = document.getElementById('status');
+          if (statusElement) {
+            statusElement.textContent = '🎤 音声認識は停止しています';
+          }
+          
+          // トグルオフ時に簡易音声入力UIを初期化
+          await initializeVoiceInput();
+          
+          console.log('音声サポートを停止しました');
+        } else {
+          // 音声サポートをオンにする
+          voiceSupportContainer.classList.add('active');
+          toggleButton.textContent = '✕';
+          toggleHelpText.textContent = '✕をクリックして音声サポートを終了';
+          
+          // 状態を更新
+          window.voiceSupportActive = true;
+          
+          const statusElement = document.getElementById('status');
+          if (statusElement) {
+            statusElement.textContent = '🎤 音声入力を初期化中...';
+          }
+          
+          try {
+            // 既存のインスタンスを破棄
+            if (voiceInput) {
+              voiceInput.dispose();
+              voiceInput = null;
+            }
+            
             // 音声モジュールを動的読み込み
             const VoiceInputClass = await loadVoiceModule();
             
             // 音声入力インスタンスを作成
             voiceInput = new VoiceInputClass({
-              containerId: 'voice-support', // コンテナID
-              apiEndpoint: '/.netlify/functions/stt', // STTエンドポイント
+              containerId: 'voice-support',
+              apiEndpoint: '/.netlify/functions/stt',
               language: 'ja-JP',
               onResult: handleVoiceResult
             });
+            
+            // 音声入力を開始
+            voiceInput.start();
+            
+          } catch (error) {
+            console.error('音声入力初期化エラー:', error);
+            
+            // UIを更新
+            voiceSupportContainer.classList.remove('active');
+            toggleButton.textContent = '🎤';
+            toggleHelpText.textContent = '🎤をクリックしてお話しください';
+            
+            const statusElement = document.getElementById('status');
+            if (statusElement) {
+              statusElement.textContent = '🔇 音声入力の初期化に失敗しました';
+            }
+            
+            window.voiceSupportActive = false;
           }
-          
-          // 音声入力を開始
-          voiceInput.start();
-          
-        } catch (error) {
-          console.error('音声入力初期化エラー:', error);
-          
-          // UIを更新
-          voiceSupportContainer.classList.remove('active');
-          toggleButton.textContent = '🎤';
-          toggleHelpText.textContent = '🎤をクリックしてお話しください';
-          
-          const statusElement = document.getElementById('status');
-          if (statusElement) {
-            statusElement.textContent = '⚠️ 音声入力の初期化に失敗しました';
-          }
-          
-          window.voiceSupportActive = false;
+        }
+      });
+      
+      // ページ読み込み時にトグルオフ状態で初期化
+      initializeVoiceInput();
+    });
+    
+    // グローバル変数
+    window.voiceSupportActive = false;
+  </script>
+
+  <!-- 既存のCloudflareスクリプト -->
+  <script>
+    (function(){
+      function c(){
+        var b = a.contentDocument || a.contentWindow.document;
+        if (b) {
+          var d = b.createElement('script');
+          d.innerHTML = "window.__CF$cv$params={r:'93cb41026c7e678d',t:'MTc0NjczMTM5Mi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";
+          b.getElementsByTagName('head')[0].appendChild(d);
         }
       }
-    });
-  });
-  
-  // グローバル変数
-  window.voiceSupportActive = false;
-</script>
+      if (document.body) {
+        var a = document.createElement('iframe');
+        a.height = 1;
+        a.width = 1;
+        a.style.position = 'absolute';
+        a.style.top = 0;
+        a.style.left = 0;
+        a.style.border = 'none';
+        a.style.visibility = 'hidden';
+        document.body.appendChild(a);
+        if ('loading' !== document.readyState) c();
+        else if (window.addEventListener) document.addEventListener('DOMContentLoaded', c);
+        else {
+          var e = document.onreadystatechange || function(){};
+          document.onreadystatechange = function(b){
+            e(b);
+            'loading' !== document.readyState && (document.onreadystatechange = e, c());
+          };
+        }
+      }
+    })();
+  </script>
+</body>
+</html>
