@@ -39,6 +39,7 @@ const speechCorrectionDict = {
 
   /* その他 */
   '講演':       '降園'
+  '登演':       '登園'
 };
 
 /* ───────── Whisper 用プロンプト ───────── */
