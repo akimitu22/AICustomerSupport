@@ -373,181 +373,122 @@ function hideInterimMessage() {
   if (interimEl) interimEl.style.display = 'none';
 }
 
-/* ───────── 音声再生 - 進捗監視機能追加 ───────── */
-/* playAudio 関数の修正部分（タイムアウト問題対応） */
+/* ───────── 音声再生 ───────── */
 function playAudio(url) {
   return new Promise((resolve, reject) => {
     try {
-      safeLog("音声再生開始処理", { url: url.substring(0, 50) + "..." });
-      
-      // 既存の音声停止
+      safeLog("音声再生開始処理", { url: url.slice(0, 60) + "…" });
+
+      /* 既存音声を完全停止 */
       if (isPlayingAudio && window.currentAudio) {
-        safeLog("既存の音声を停止", "停止処理");
-        try {
-          window.currentAudio.pause();
-          window.currentAudio.src = ""; 
-        } catch (pauseError) {
-          safeLog("既存音声停止エラー", pauseError);
-        }
+        try { window.currentAudio.pause(); } catch {}
+        window.currentAudio.src = "";
         window.currentAudio = null;
         isPlayingAudio = false;
       }
-      
-      // 新しい音声オブジェクト作成
+
+      /* 新しい Audio インスタンス */
       window.currentAudio = new Audio();
-      
-      // 進捗監視のための変数
-      let lastPosition = 0;
-      let stagnantCount = 0;
+      let lastPos = 0;
+      let idleCount = 0;
+      const MAX_IDLE = 6;                 // ← ★ idle 緩和 6-8 回
+      const IDLE_TH = 0.1;                // ← ★ Δ < 0.1 s で idle 加算
+      const RESET_TH = 0.5;               // ← ★ Δ ≥ 0.5 s で idle リセット
       let progressTimer = null;
-      let startTime = Date.now();
-      
-      // 再生進捗を監視する関数
-      function startProgressMonitoring() {
+      let backupTimer   = null;
+
+      /* 進捗監視 */
+      const startWatch = () => {
         progressTimer = setInterval(() => {
-          if (!window.currentAudio || !isPlayingAudio) return;
-          
-          try {
-            // 現在の再生位置を取得
-            const currentPosition = window.currentAudio.currentTime;
-            
-            // 経過時間をチェック (30秒を超えたら強制終了)
-            const elapsed = (Date.now() - startTime) / 1000;
-            if (elapsed > 30) {
-              safeLog("音声再生最大時間超過", { elapsed: elapsed });
-              clearInterval(progressTimer);
-              try {
-                window.currentAudio.pause();
-              } catch (e) {
-                safeLog("停止エラー", e);
-              }
-              isPlayingAudio = false;
-              resolve();
-              return;
+          if (!isPlayingAudio) return;
+
+          const cur = window.currentAudio.currentTime;
+          const delta = cur - lastPos;
+
+          if (delta < IDLE_TH) {
+            idleCount++;
+            if (idleCount >= MAX_IDLE) {
+              safeLog("無音停止検出", { cur, idleCount });
+              cleanup();            // 停止処理
             }
-            
-            // 位置が変わっていない場合
-            if (currentPosition === lastPosition) {
-              stagnantCount++;
-              safeLog("再生位置が変わっていません", { 
-                position: currentPosition, 
-                count: stagnantCount,
-                elapsed: elapsed
-              });
-              
-              // 2秒間位置が変わらなければ停止とみなす
-              if (stagnantCount >= 2) {
-                safeLog("再生停止を検出", "自動完了");
-                clearInterval(progressTimer);
-                try {
-                  window.currentAudio.pause();
-                } catch (e) {
-                  safeLog("停止エラー", e);
-                }
-                isPlayingAudio = false;
-                resolve();
-              }
-            } else {
-              // 位置が変わっていればカウンターリセット
-              stagnantCount = 0;
-              lastPosition = currentPosition;
-              safeLog("再生進行中", { position: currentPosition, elapsed: elapsed });
-            }
-          } catch (e) {
-            safeLog("進捗監視エラー", e);
+          } else if (delta >= RESET_TH) {
+            idleCount = 0;          // 大きく進んだらカウンタ初期化
           }
+          lastPos = cur;
         }, 1000);
-      }
-      
-      // エラーハンドリング
-      window.currentAudio.onerror = (e) => {
-        if (progressTimer) clearInterval(progressTimer);
-        safeLog("音声読み込みエラー", {
-          code: window.currentAudio.error ? window.currentAudio.error.code : 'unknown',
-          message: window.currentAudio.error ? window.currentAudio.error.message : 'unknown'
-        });
-        isPlayingAudio = false;
-        reject(new Error("音声の読み込みに失敗しました"));
       };
-      
-      // 再生準備完了イベント
-      window.currentAudio.oncanplaythrough = () => {
-        safeLog("音声再生準備完了", "準備完了");
-        isPlayingAudio = true;
-        
-        try {
-          const playPromise = window.currentAudio.play();
-          startProgressMonitoring(); // 進捗監視を開始
-          
-          if (playPromise !== undefined) {
-            playPromise
-              .then(() => safeLog("音声再生開始", "再生中"))
-              .catch(err => {
-                if (progressTimer) clearInterval(progressTimer);
-                safeLog("音声再生Promise失敗", err);
-                isPlayingAudio = false;
-                reject(err);
-              });
-          } else {
-            safeLog("音声再生開始 (Promiseなし)", "再生中");
-          }
-        } catch (playError) {
-          if (progressTimer) clearInterval(progressTimer);
-          safeLog("音声再生直接エラー", playError);
-          isPlayingAudio = false;
-          reject(playError);
-        }
-      };
-      
-      // 再生終了イベント
-      window.currentAudio.onended = () => {
-        if (progressTimer) clearInterval(progressTimer);
-        safeLog("音声再生終了", "正常終了");
+
+      /* 停止共通処理 */
+      const cleanup = () => {
+        try { window.currentAudio.pause(); } catch {}
+        clearInterval(progressTimer);
+        clearTimeout(backupTimer);
         isPlayingAudio = false;
         resolve();
       };
-      
-      // URL設定とロード開始
+
+      /* エラー処理 */
+      window.currentAudio.onerror = (e) => {
+        clearInterval(progressTimer);
+        clearTimeout(backupTimer);
+        isPlayingAudio = false;
+        reject(new Error("音声読み込み失敗"));
+      };
+
+      /* 再生準備完了 → 動的タイマー確定 */
+      window.currentAudio.oncanplaythrough = () => {
+        safeLog("音声 oncanplaythrough", { duration: window.currentAudio.duration });
+
+        /* 動的バックアップ: (音声長 +10 s) ただし最大90 s */
+        const dur = isFinite(window.currentAudio.duration) && window.currentAudio.duration > 0
+          ? Math.min(90, window.currentAudio.duration + 10)
+          : 90;
+
+        backupTimer = setTimeout(() => {
+          safeLog("バックアップタイマー発火", { dur });
+          cleanup();
+        }, dur * 1000);
+
+        /* 再生開始 */
+        isPlayingAudio = true;
+        window.currentAudio.play()
+          .then(() => safeLog("音声再生開始"))
+          .catch(err => { clearTimeout(backupTimer); reject(err); });
+
+        startWatch();   // 進捗監視開始
+      };
+
+      /* 再生正常終了 */
+      window.currentAudio.onended = () => {
+        safeLog("音声再生 onended");
+        cleanup();
+      };
+
+      /* URL 設定してロード */
       window.currentAudio.src = url;
       window.currentAudio.load();
-      
-      // バックアップタイムアウト (短く設定: 30秒)
-      // これは最長の音声でも十分
-      setTimeout(() => {
-        if (isPlayingAudio) {
-          if (progressTimer) clearInterval(progressTimer);
-          safeLog("音声再生バックアップタイムアウト", "30秒経過");
-          try {
-            window.currentAudio.pause();
-          } catch (e) {
-            safeLog("タイムアウト時の停止エラー", e);
-          }
-          isPlayingAudio = false;
-          resolve();
-        }
-      }, 30000); // 30秒
-      
-    } catch (e) {
-      safeLog("playAudio関数内エラー", e);
+
+    } catch (err) {
       isPlayingAudio = false;
-      reject(e);
+      reject(err);
     }
   });
 }
 
 /* ───────── クイックリンク & UI ───────── */
-function createQuickLinks(){
-  const arr=[
+function createQuickLinks() {
+  const arr = [
     '幼稚園の基本情報を教えてください',
     '入園の申し込みについて教えてください',
     '給食について教えてください',
     '保育時間について教えてください',
     '見学できますか？'
   ];
-  quickLinksEl.innerHTML='';
-  arr.forEach(t=>{
-    const b=document.createElement('button'); b.textContent=t; b.className='ql';
-    b.onclick=()=>{recogEl.textContent=`お問合せ内容: ${t}`; handleAI(t);};
+  quickLinksEl.innerHTML = '';
+  arr.forEach(t => {
+    const b = document.createElement('button');
+    b.textContent = t; b.className = 'ql';
+    b.onclick = () => { recogEl.textContent = `お問合せ内容: ${t}`; handleAI(t); };
     quickLinksEl.appendChild(b);
   });
 }
