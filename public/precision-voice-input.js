@@ -164,7 +164,6 @@ class PrecisionVoiceInput {
       // visibilitychangeイベントで再試行（iOS 15以下のタイミング依存エラー対応）
       this._boundVisibilityChange = async () => {
         if (document.visibilityState === 'visible' && this.audioContext?.state === 'suspended') {
-Cyclomatic complexity: 10
           const resumed = await this._resumeAudioContext();
           if (!resumed) {
             this._handleError(new Error('AudioContextを再開できませんでした。ページをリロードしてください。'));
