@@ -95,7 +95,7 @@ function vadMonitor(e){
       recordingChunks=[]; recordingStartTime=Date.now(); mediaRecorder.start();
     }
     clearTimeout(silenceTimer);
-    silenceTimer=setTimeout(stopRecording,1300);
+    silenceTimer=setTimeout(stopRecording,1500); // 1.5秒に延長
   }
 }
 
@@ -110,6 +110,14 @@ async function handleRecordingStop() {
   
   safeLog("録音Blobサイズ", blob.size);
   
+  // 録音時間をチェック - 短すぎる場合は処理しない
+  const duration = (Date.now() - recordingStartTime) / 1000;
+  if (duration < 1.5) {
+    statusEl.textContent = '❌ 発話が短すぎます。もう少し長く話してください。';
+    vadActive = true;
+    return;
+  }
+  
   try {
     statusEl.textContent = '🧠 発話認識中…';
     
@@ -121,14 +129,14 @@ async function handleRecordingStop() {
       )
     );
     
-    const duration = (Date.now() - recordingStartTime) / 1000;
     safeLog("音声データサイズ", Math.round(base64Data.length / 1024) + "KB");
     safeLog("録音時間", duration + "秒");
     
     // STTリクエスト送信
     safeLog("STTリクエスト送信開始", {
       endpoint: '/.netlify/functions/stt',
-      format: 'audio/webm'
+      format: 'audio/webm',
+      duration: duration
     });
     
     // STTリクエスト送信 (エラーハンドリング強化)
@@ -152,7 +160,11 @@ async function handleRecordingStop() {
       });
       
       if (!response.ok) {
-        throw new Error(`STTサーバーエラー: ${response.status} ${response.statusText}`);
+        if (response.status === 422) {
+          throw new Error("音声を認識できませんでした。もう少しはっきり話してください。");
+        } else {
+          throw new Error(`STTサーバーエラー: ${response.status} ${response.statusText}`);
+        }
       }
       
       // レスポンスのJSONパース (エラーハンドリング強化)
