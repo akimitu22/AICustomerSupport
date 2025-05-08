@@ -340,9 +340,10 @@
       // 動的import()で音声モジュールを読み込む
       async function loadVoiceModule() {
         // 注意: precision-voice-input.js のパスはプロジェクト構造に応じて調整してください
-        // 例: './js/precision-voice-input.js' や '/scripts/precision-voice-input.js'
+        // 例: '/js/precision-voice-input.js'（Netlifyのpublic/js配下の場合）
+        //     './js/precision-voice-input.js'（index.htmlと同じディレクトリにjsフォルダがある場合）
         try {
-          const module = await import('./precision-voice-input.js');
+          const module = await import('/precision-voice-input.js');
           // グローバル登録
           window.PrecisionVoiceInput = module.default;
           return module.default;
