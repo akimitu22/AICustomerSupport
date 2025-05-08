@@ -279,6 +279,128 @@
       // 音声認識エンジンの選択モード (デフォルトは高精度モード)
       window.useEnhancedVoiceRecognition = true;
       
+      // クラスのチェックとポーリング機能を追加
+      function checkPrecisionVoiceInputClass(maxAttempts = 10, currentAttempt = 0) {
+        if (typeof window.PrecisionVoiceInput === 'function') {
+          // クラスが利用可能になった
+          console.log('PrecisionVoiceInput クラスを検出しました');
+          initVoiceInput();
+          window.voiceModuleLoaded = true;
+          window.voiceSupportActive = true;
+        } else if (currentAttempt < maxAttempts) {
+          // まだクラスが利用可能になっていない、再試行
+          console.log(`PrecisionVoiceInput クラス待機中... (${currentAttempt + 1}/${maxAttempts})`);
+          setTimeout(() => checkPrecisionVoiceInputClass(maxAttempts, currentAttempt + 1), 200);
+        } else {
+          // 最大試行回数を超えた、フォールバック
+          console.error('PrecisionVoiceInput クラスが見つかりませんでした');
+          // 従来の音声認識にフォールバック
+          loadFallbackRecognition();
+        }
+      }
+      
+      // フォールバック認識の読み込み
+      function loadFallbackRecognition() {
+        window.useEnhancedVoiceRecognition = false;
+        if (!window.clientScriptLoaded) {
+          const script = document.createElement('script');
+          script.src = 'client.js';
+          script.onload = function() {
+            console.log('client.js読み込み完了 (フォールバック)');
+            window.clientScriptLoaded = true;
+            window.voiceSupportActive = true;
+          };
+          document.body.appendChild(script);
+        } else if (window.startVAD) {
+          window.startVAD().catch(console.error);
+        }
+      }
+      
+      // 音声認識モジュールの読み込み
+      function loadVoiceRecognitionModule() {
+        if (window.useEnhancedVoiceRecognition) {
+          if (!window.voiceModuleLoaded) {
+            // 新しい精度優先音声入力の読み込み
+            const script = document.createElement('script');
+            script.src = 'precision-voice-input.js';
+            script.onload = function() {
+              console.log('precision-voice-input.js読み込み完了');
+              // クラスのチェックを開始
+              checkPrecisionVoiceInputClass();
+            };
+            document.body.appendChild(script);
+          } else {
+            // すでに読み込まれている場合は初期化
+            initVoiceInput();
+          }
+        } else {
+          // 従来の音声認識
+          loadFallbackRecognition();
+        }
+      }
+      
+      // 高精度音声入力の初期化
+      function initVoiceInput() {
+        if (typeof PrecisionVoiceInput === 'function') {
+          try {
+            // 既存の音声入力があれば破棄
+            if (window.voiceInput && typeof window.voiceInput.dispose === 'function') {
+              window.voiceInput.dispose();
+            }
+            
+            // 新しいインスタンスを作成
+            window.voiceInput = new PrecisionVoiceInput({
+              containerId: 'voice-input-container',
+              apiEndpoint: '/.netlify/functions/stt',
+              language: 'ja-JP',
+              onResult: handleVoiceResult
+            });
+            
+            // ステータス表示の更新
+            const statusElement = document.getElementById('status');
+            if (statusElement) {
+              statusElement.innerHTML = '🎤 新しい音声入力システムが起動しました';
+            }
+            
+            console.log('新しい音声入力システムを初期化しました');
+          } catch (error) {
+            console.error('音声入力システムの初期化に失敗:', error);
+            
+            // ステータス表示の更新
+            const statusElement = document.getElementById('status');
+            if (statusElement) {
+              statusElement.innerHTML = '⚠️ 音声入力システムの初期化に失敗しました';
+            }
+            
+            // フォールバック: 従来の音声認識に切り替え
+            window.useEnhancedVoiceRecognition = false;
+            loadFallbackRecognition();
+          }
+        } else {
+          console.error('PrecisionVoiceInput クラスが見つかりません');
+          
+          // フォールバック: 従来の音声認識に切り替え
+          window.useEnhancedVoiceRecognition = false;
+          loadFallbackRecognition();
+        }
+      }
+      
+      // 音声認識結果の処理
+      function handleVoiceResult(transcript) {
+        console.log('音声認識結果:', transcript);
+        
+        // 認識結果を表示
+        const recognizedElement = document.getElementById('recognized');
+        if (recognizedElement) {
+          recognizedElement.textContent = `お問合せ内容: ${transcript}`;
+        }
+        
+        // 既存のAI処理関数を使用
+        if (window.handleAI && typeof window.handleAI === 'function') {
+          window.handleAI(transcript);
+        }
+      }
+      
       toggleButton.addEventListener('click', function() {
         const isActive = voiceSupportContainer.classList.contains('active');
         
@@ -334,135 +456,10 @@
           toggleButton.textContent = '✕';
           toggleHelpText.textContent = '✕をクリックして音声サポートを終了';
           
-          // 音声サポートの開始 - 高精度モードと通常モードを切り替え
-          if (window.useEnhancedVoiceRecognition) {
-            // 高精度音声認識モード
-            if (!window.voiceModuleLoaded) {
-              // 新しい精度優先音声入力の読み込み
-              const script = document.createElement('script');
-              script.src = 'precision-voice-input.js';
-              script.onload = function() {
-                console.log('precision-voice-input.js読み込み完了');
-                initVoiceInput();
-                window.voiceModuleLoaded = true;
-                window.voiceSupportActive = true;
-              };
-              document.body.appendChild(script);
-            } else if (window.voiceInput || window.PrecisionVoiceInput) {
-              // すでに読み込まれている場合は初期化
-              initVoiceInput();
-              window.voiceSupportActive = true;
-            }
-          } else {
-            // 従来の音声認識モード
-            if (!window.clientScriptLoaded) {
-              const script = document.createElement('script');
-              script.src = 'client.js';
-              script.onload = function() {
-                console.log('client.js読み込み完了');
-                window.clientScriptLoaded = true;
-                window.voiceSupportActive = true;
-              };
-              document.body.appendChild(script);
-            } else if (window.startVAD && !window.voiceSupportActive) {
-              // 再開
-              window.voiceSupportActive = true;
-              window.startVAD().catch(err => {
-                console.error('マイク再開失敗:', err);
-                // 失敗した場合は音声サポートをオフに戻す
-                voiceSupportContainer.classList.remove('active');
-                toggleButton.textContent = '🎤';
-                toggleHelpText.textContent = '🎤をクリックしてお話しください';
-                window.voiceSupportActive = false;
-              });
-            }
-          }
+          // 音声サポートの開始
+          loadVoiceRecognitionModule();
         }
       });
-      
-      // 新しい音声入力の初期化関数
-      function initVoiceInput() {
-        if (typeof PrecisionVoiceInput === 'function') {
-          try {
-            // 既存の音声入力があれば破棄
-            if (window.voiceInput && typeof window.voiceInput.dispose === 'function') {
-              window.voiceInput.dispose();
-            }
-            
-            // 新しいインスタンスを作成
-            window.voiceInput = new PrecisionVoiceInput({
-              containerId: 'voice-input-container',
-              apiEndpoint: '/.netlify/functions/stt',
-              language: 'ja-JP',
-              onResult: handleVoiceResult
-            });
-            
-            // ステータス表示の更新
-            const statusElement = document.getElementById('status');
-            if (statusElement) {
-              statusElement.innerHTML = '🎤 新しい音声入力システムが起動しました';
-            }
-            
-            console.log('新しい音声入力システムを初期化しました');
-          } catch (error) {
-            console.error('音声入力システムの初期化に失敗:', error);
-            
-            // ステータス表示の更新
-            const statusElement = document.getElementById('status');
-            if (statusElement) {
-              statusElement.innerHTML = '⚠️ 音声入力システムの初期化に失敗しました';
-            }
-            
-            // フォールバック: 従来の音声認識に切り替え
-            window.useEnhancedVoiceRecognition = false;
-            if (!window.clientScriptLoaded) {
-              const script = document.createElement('script');
-              script.src = 'client.js';
-              script.onload = function() {
-                console.log('client.js読み込み完了 (フォールバック)');
-                window.clientScriptLoaded = true;
-                window.voiceSupportActive = true;
-              };
-              document.body.appendChild(script);
-            } else if (window.startVAD) {
-              window.startVAD().catch(console.error);
-            }
-          }
-        } else {
-          console.error('PrecisionVoiceInput クラスが見つかりません');
-          
-          // フォールバック: 従来の音声認識に切り替え
-          window.useEnhancedVoiceRecognition = false;
-          if (!window.clientScriptLoaded) {
-            const script = document.createElement('script');
-            script.src = 'client.js';
-            script.onload = function() {
-              console.log('client.js読み込み完了 (フォールバック)');
-              window.clientScriptLoaded = true;
-              window.voiceSupportActive = true;
-            };
-            document.body.appendChild(script);
-          } else if (window.startVAD) {
-            window.startVAD().catch(console.error);
-          }
-        }
-      }
-      
-      // 音声認識結果の処理
-      function handleVoiceResult(transcript) {
-        console.log('音声認識結果:', transcript);
-        
-        // 認識結果を表示
-        const recognizedElement = document.getElementById('recognized');
-        if (recognizedElement) {
-          recognizedElement.textContent = `お問合せ内容: ${transcript}`;
-        }
-        
-        // 既存のAI処理関数を使用
-        if (window.handleAI && typeof window.handleAI === 'function') {
-          window.handleAI(transcript);
-        }
-      }
     });
   </script>
 
