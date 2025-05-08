@@ -16,11 +16,12 @@ function optimizeJapaneseReading(text) {
     .replace(/副園長/g, 'ふくえんちょう')
     .replace(/入園/g, 'にゅうえん')
     .replace(/園庭/g, 'えんてい')
+    .replace(/登園/g, 'とうえん')
     .replace(/降園/g, 'こうえん')
     .replace(/他園/g, 'たえん')
     .replace(/卒園/g, 'そつえん')
     .replace(/園/g, 'えん')
-    .replace(/大坪園子/g, 'おおつぼそのこ');
+    .replace(/園子/g, 'そのこ');
 }
 
 // マークダウンをシンプルテキストに変換
