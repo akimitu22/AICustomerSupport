@@ -2,259 +2,166 @@
 const axios = require('axios');
 const FormData = require('form-data');
 
-// 実際に発生した誤変換の修正辞書
+/* ───────── 誤変換辞書 ───────── */
 const speechCorrectionDict = {
-  // ホザナ幼稚園の実際の誤変換
-  "おだな幼稚園": "ホザナ幼稚園",
-  "おさない幼稚園": "ホザナ幼稚園",
-  "幼い幼稚園": "ホザナ幼稚園",
-  "小棚幼稚園": "ホザナ幼稚園",
-  "児玉幼稚園": "ホザナ幼稚園",
-  
-  // 預かり保育の実際の誤変換
-  "あつかいほいく": "預かり保育",
-  "あつがりほいく": "預かり保育",
-  "扱い保育": "預かり保育",
-  "暑がり保育": "預かり保育",
-  
-  // 願書の実際の誤変換
-  "がんしょう": "願書",
-  "かんしょう": "願書",
-  "干渉": "願書",
-  "眼症": "願書",
-  "顔症": "願書",
-  "元祥": "願書",
-  "がんしょ": "願書",
-  "かんしょ": "願書",
-  "幹書": "願書",
-  "みきしょ": "願書",
-  
-  // その他の実際の誤変換
-  "ホザナ保育園": "ホザナ幼稚園",
-  "保育員": "保育園"
+  /* ホザナ幼稚園 */
+  'おだな幼稚園': 'ホザナ幼稚園',
+  'おさない幼稚園': 'ホザナ幼稚園',
+  '幼い幼稚園':   'ホザナ幼稚園',
+  '小棚幼稚園':   'ホザナ幼稚園',
+  '児玉幼稚園':   'ホザナ幼稚園',
+
+  /* 預かり保育 */
+  'あつかいほいく': '預かり保育',
+  'あつがりほいく': '預かり保育',
+  '扱い保育':       '預かり保育',
+  '暑がり保育':     '預かり保育',
+
+  /* 願書 */
+  'がんしょう': '願書',
+  'かんしょう': '願書',
+  '干渉':       '願書',
+  '眼症':       '願書',
+  '顔症':       '願書',
+  '元祥':       '願書',
+  'がんしょ':   '願書',
+  'かんしょ':   '願書',
+  '幹書':       '願書',
+  'みきしょ':   '願書',
+
+  /* モンテッソーリゆれ & 誤認識 */
+  'モンテストーリー':       'モンテッソーリ',
+  'モンテストーリー教育':   'モンテッソーリ教育',
+  'モンテソーリ':           'モンテッソーリ',
+  'モンテソリー':           'モンテッソーリ',
+  'マンテッソーリ':         'モンテッソーリ',
+  'モンテッソリ':           'モンテッソーリ',
+
+  /* その他 */
+  'ホザナ保育園': 'ホザナ幼稚園',
+  '保育員':       '保育園'
 };
 
-// 幼稚園関連の音声認識向上のための特別プロンプト
-const KINDERGARTEN_PROMPT = 
-  '===== 音声認識コンテキスト：ようちえん入園あんない =====\n' +
-  'ほざなようちえんの入園手続きに関する会話です。\n\n' +
-  '===== 重要な音声パターン認識 =====\n' + 
-  '・「ほざな」- ようちえん名の固有発音\n' +
-  '  誤認識されやすい音声：「おだな」「おさない」\n' +
-  '・「あずかりほいく」- 重要サービス名\n' +
-  '  誤認識されやすい音声：「あつかいほいく」「あつがりほいく」\n' +
-  '・「がんしょ」- 入園関連書類名\n' +
-  '  誤認識されやすい音声：「がんしょう」「かんしょ」「みきしょ」\n\n' +
-  '===== 文脈ヒント =====\n' + 
-  '・「ほざな」と「ようちえん」は常に一体の固有名詞です\n' +
-  '・「あずかり」と「ほいく」は常に一体のサービス名です\n' +
-  '・この会話はようちえん関連の用語のみを使用します\n' +
-  '・入園手続きに関する会話です';
+/* ───────── Whisper 用プロンプト ───────── */
+const KINDERGARTEN_PROMPT =
+  '===== 音声認識コンテキスト：ホザナ幼稚園 入園案内 =====\n' +
+  'この会話はホザナ幼稚園の入園手続き・モンテッソーリ教育に関する Q&A です。\n\n' +
+  '===== 用語ガイド =====\n' +
+  '・「ホザナ幼稚園」は固有名詞です（誤認例: おだな／おさない）。\n' +
+  '・「預かり保育」は園のサービス名です（誤認例: あつかりほいく）。\n' +
+  '・「願書」は入園書類名です（誤認例: がんしょう）。\n' +
+  '・「モンテッソーリ教育」は頻出教育法です（誤認例: モンテストーリー）。\n\n' +
+  '===== 出力上の禁止事項 =====\n' +
+  '※ 出力テキストに【名前】のような話者ラベルや Speaker タグを付けないでください。\n';
 
-/**
- * 幼稚園関連の誤変換補正を実行する関数
- * @param {string} text - 音声認識された生テキスト
- * @returns {string} - 補正されたテキスト
- */
+/* ───────── 前処理：話者ラベル除去 ───────── */
+function stripSpeakerLabel(text) {
+  return text.replace(
+    /^\s*(?:【[^】]{1,12}】|\[[^\]]{1,12}\]|\([^\)]{1,12}\)|[^\s]{1,12}[：:])\s*/u,
+    ''
+  );
+}
+
+/* ───────── 誤変換補正 ───────── */
 function correctKindergartenTerms(text) {
   let corrected = text;
-  
-  // 実際の誤変換パターンに基づく修正
-  Object.entries(speechCorrectionDict).forEach(([key, val]) => {
-    corrected = corrected.replace(new RegExp(key, 'g'), val);
-  });
-  
-  // 円→園の特殊変換（前後の文脈を考慮）
-  corrected = corrected.replace(/(\d+)([万千百十]?)円/g, '$1$2円'); // 数字+円はそのまま
-  corrected = corrected.replace(/([^\d０-９万千百十])円/g, '$1園'); // 数字以外+円は園に変換
-  
-  // 「〜しますか？」が「〜しますから？」になる誤りを修正
+
+  /* 基本辞書置換 */
+  for (const [wrong, right] of Object.entries(speechCorrectionDict)) {
+    corrected = corrected.replace(new RegExp(wrong, 'g'), right);
+  }
+
+  /* 円⇄園 誤変換 */
+  corrected = corrected
+    .replace(/(\d+)([万千百十]?)円/g, '$1$2円')          // 数字＋円はそのまま
+    .replace(/([^\d０-９万千百十])円/g, '$1園');            // それ以外＋円→園
+
+  /* しますから？→しますか？ */
   corrected = corrected.replace(/しますから\?/g, 'しますか?');
-  
-  // ひらがなだけの「ようちえん」を「幼稚園」に変換
+
+  /* ひらがなの ようちえん → 幼稚園 */
   corrected = corrected.replace(/ようちえん/g, '幼稚園');
-  
+
   return corrected;
 }
 
-/**
- * Whisper APIに音声データを送信する関数
- * @param {Buffer} audioBuffer - 音声データのバッファ
- * @param {string} format - 音声フォーマット
- * @returns {Promise<Object>} - Whisper APIのレスポンス
- */
+/* ───────── Whisper API 呼び出し ───────── */
 async function callWhisperAPI(audioBuffer, format) {
   const formData = new FormData();
-  
   formData.append('file', audioBuffer, {
     filename: 'audio.webm',
     contentType: format || 'audio/webm'
   });
-  
   formData.append('model', 'whisper-1');
   formData.append('prompt', KINDERGARTEN_PROMPT);
-  
-  const formHeaders = formData.getHeaders();
-  formHeaders['Content-Length'] = await new Promise(resolve =>
-    formData.getLength((err, len) => resolve(len))
+
+  const headers = formData.getHeaders();
+  headers['Content-Length'] = await new Promise(res =>
+    formData.getLength((_, len) => res(len))
   );
-  
-  return axios.post(
-    'https://api.openai.com/v1/audio/transcriptions',
-    formData,
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        ...formHeaders
-      },
-      maxBodyLength: 25 * 1024 * 1024,
-      maxContentLength: 25 * 1024 * 1024,
-      timeout: 25000
-    }
-  );
+
+  return axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
+    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, ...headers },
+    maxBodyLength: 25 * 1024 * 1024,
+    maxContentLength: 25 * 1024 * 1024,
+    timeout: 25000
+  });
 }
 
-/**
- * 一貫したレスポンス形式を生成するヘルパー関数
- * @param {number} statusCode - HTTPステータスコード 
- * @param {Object} headers - HTTPヘッダー
- * @param {Object} data - レスポンスデータ 
- * @param {string} [errorMessage] - エラーメッセージ（エラー時のみ）
- * @returns {Object} - 形式化されたレスポンス
- */
-function formatResponse(statusCode, headers, data = {}, errorMessage = null) {
-  // 一貫した形式のボディを作成
-  const responseBody = {
-    success: statusCode >= 200 && statusCode < 300
-  };
-  
-  // エラーの場合はエラー情報を追加
-  if (errorMessage) {
-    responseBody.error = errorMessage;
-    if (data.details) {
-      responseBody.details = data.details;
-    }
-  } 
-  // 成功の場合はデータをマージ
-  else {
-    Object.assign(responseBody, data);
-    
-    // text プロパティが必ず存在することを保証
-    if (!responseBody.text && responseBody.stt && responseBody.stt.text) {
-      responseBody.text = responseBody.stt.text;
-    } 
-    
-    // text が空文字列または未定義の場合の対応
-    if (!responseBody.text || responseBody.text.trim() === '') {
-      // 音声認識が空の場合はエラーとして処理
-      responseBody.success = false;
-      responseBody.error = "認識されたテキストが空です";
-      responseBody.text = "認識エラー"; // エラーメッセージをテキストにセット
-      // ステータスコードを変更
-      statusCode = 422; // Unprocessable Entity
-    }
+/* ───────── 共通レスポンス整形 ───────── */
+function formatResponse(statusCode, headers, data = {}, error = null) {
+  const body = { success: statusCode >= 200 && statusCode < 300, ...data };
+  if (error) body.error = error;
+  if (!body.text && body.stt?.text) body.text = body.stt.text;
+  if (!body.text?.trim()) {
+    body.success = false;
+    body.error = body.error || '認識されたテキストが空です';
+    body.text = '認識エラー';
+    statusCode = 422;
   }
-  
-  return {
-    statusCode,
-    headers,
-    body: JSON.stringify(responseBody)
-  };
+  return { statusCode, headers, body: JSON.stringify(body) };
 }
 
-// メインハンドラー関数
-exports.handler = async function(event, context) {
+/* ───────── Lambda ハンドラ ───────── */
+exports.handler = async (event) => {
   const headers = {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Allow-Methods": "POST, OPTIONS"
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS'
   };
 
-  // OPTIONS preflight
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers, body: "" };
-  }
-
-  // only POST
-  if (event.httpMethod !== 'POST') {
-    return formatResponse(405, headers, {}, 'Method Not Allowed');
-  }
-
-  console.log("STT start");
-  console.log("isBase64Encoded:", event.isBase64Encoded);
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
+  if (event.httpMethod !== 'POST') return formatResponse(405, headers, {}, 'Method Not Allowed');
 
   try {
-    // リクエストの検証
-    const contentType = event.headers['content-type'] || '';
-    if (!contentType.includes('application/json')) {
-      return formatResponse(400, headers, {}, "JSON required");
-    }
+    if (!event.headers['content-type']?.includes('application/json'))
+      return formatResponse(400, headers, {}, 'JSON required');
 
-    let req;
-    try {
-      req = JSON.parse(event.body || '{}');
-    } catch (e) {
-      return formatResponse(400, headers, { details: e.message }, "JSON parse error");
-    }
+    const req = JSON.parse(event.body || '{}');
+    if (!req.audio) return formatResponse(400, headers, {}, 'No audio data');
+    if (!process.env.OPENAI_API_KEY) return formatResponse(500, headers, {}, 'API key missing');
 
-    if (!req.audio) {
-      return formatResponse(400, headers, {}, "No audio data");
-    }
-
-    if (!process.env.OPENAI_API_KEY) {
-      return formatResponse(500, headers, {}, "API key missing");
-    }
-
-    // 音声データの準備と検証
-    console.log("Audio length:", req.audio.length);
-    console.log("Format:", req.format);
-    
+    /* 音声サイズ検証 */
     const audioBuffer = Buffer.from(req.audio, 'base64');
-    const sizeMB = audioBuffer.length / (1024 * 1024);
-    if (sizeMB > 9.5) {
-      return formatResponse(413, headers, {}, "Audio too large (>10MB)");
-    }
+    if (audioBuffer.length / (1024 * 1024) > 9.5)
+      return formatResponse(413, headers, {}, 'Audio too large (>10 MB)');
 
-    // Whisper APIを呼び出し
-    console.log("Calling Whisper API");
+    /* Whisper 呼び出し */
     const resp = await callWhisperAPI(audioBuffer, req.format);
-    console.log("Whisper status:", resp.status);
+    let recognized = resp.data.text || '';
+    recognized = stripSpeakerLabel(recognized);        // ← 話者ラベルを除去
+    const corrected = correctKindergartenTerms(recognized);
 
-    // 音声認識結果の補正処理
-    let recognizedText = resp.data.text || '';
-    
-    // 認識テキストが空かチェック
-    if (!recognizedText.trim()) {
-      return formatResponse(422, headers, {}, "音声認識テキストが空です");
-    }
-    
-    let correctedText = correctKindergartenTerms(recognizedText);
-    
-    // 入力と修正結果が異なる場合はログ出力
-    if (recognizedText !== correctedText) {
-      console.log("Text correction applied:");
-      console.log("Before:", recognizedText);
-      console.log("After:", correctedText);
-    }
-
-    // 一貫したレスポンス形式で返す
-    return formatResponse(200, headers, { 
-      text: correctedText, 
-      originalText: recognizedText,
+    return formatResponse(200, headers, {
+      text: corrected,
+      originalText: recognized,
       timestamp: Date.now()
     });
 
-  } catch (error) {
-    console.error("STT error:", error);
-    if (error.stack) console.error(error.stack);
-    
-    if (axios.isAxiosError(error) && error.code === 'ECONNABORTED') {
-      return formatResponse(504, headers, { details: error.message }, "Timeout");
-    }
-    
-    const status = error.response?.status || 500;
-    const detail = error.response?.data || error.message;
-    return formatResponse(status, headers, { details: detail }, "Whisper API error");
+  } catch (err) {
+    const status = err.response?.status || 500;
+    const detail = err.response?.data || err.message;
+    return formatResponse(status, headers, { details: detail }, 'Whisper API error');
   }
 };
