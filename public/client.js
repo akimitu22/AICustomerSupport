@@ -374,6 +374,7 @@ function hideInterimMessage() {
 }
 
 /* ───────── 音声再生 - 進捗監視機能追加 ───────── */
+/* playAudio 関数の修正部分（タイムアウト問題対応） */
 function playAudio(url) {
   return new Promise((resolve, reject) => {
     try {
@@ -399,6 +400,7 @@ function playAudio(url) {
       let lastPosition = 0;
       let stagnantCount = 0;
       let progressTimer = null;
+      let startTime = Date.now();
       
       // 再生進捗を監視する関数
       function startProgressMonitoring() {
@@ -409,18 +411,39 @@ function playAudio(url) {
             // 現在の再生位置を取得
             const currentPosition = window.currentAudio.currentTime;
             
+            // 経過時間をチェック (30秒を超えたら強制終了)
+            const elapsed = (Date.now() - startTime) / 1000;
+            if (elapsed > 30) {
+              safeLog("音声再生最大時間超過", { elapsed: elapsed });
+              clearInterval(progressTimer);
+              try {
+                window.currentAudio.pause();
+              } catch (e) {
+                safeLog("停止エラー", e);
+              }
+              isPlayingAudio = false;
+              resolve();
+              return;
+            }
+            
             // 位置が変わっていない場合
             if (currentPosition === lastPosition) {
               stagnantCount++;
               safeLog("再生位置が変わっていません", { 
                 position: currentPosition, 
-                count: stagnantCount 
+                count: stagnantCount,
+                elapsed: elapsed
               });
               
-              // 3秒間位置が変わらなければ停止とみなす
-              if (stagnantCount >= 3) {
+              // 2秒間位置が変わらなければ停止とみなす
+              if (stagnantCount >= 2) {
                 safeLog("再生停止を検出", "自動完了");
                 clearInterval(progressTimer);
+                try {
+                  window.currentAudio.pause();
+                } catch (e) {
+                  safeLog("停止エラー", e);
+                }
                 isPlayingAudio = false;
                 resolve();
               }
@@ -428,7 +451,7 @@ function playAudio(url) {
               // 位置が変わっていればカウンターリセット
               stagnantCount = 0;
               lastPosition = currentPosition;
-              safeLog("再生進行中", { position: currentPosition });
+              safeLog("再生進行中", { position: currentPosition, elapsed: elapsed });
             }
           } catch (e) {
             safeLog("進捗監視エラー", e);
@@ -488,12 +511,12 @@ function playAudio(url) {
       window.currentAudio.src = url;
       window.currentAudio.load();
       
-      // バックアップタイムアウト (180秒 = 3分)
-      // 通常の回答でも十分な時間
+      // バックアップタイムアウト (短く設定: 30秒)
+      // これは最長の音声でも十分
       setTimeout(() => {
         if (isPlayingAudio) {
           if (progressTimer) clearInterval(progressTimer);
-          safeLog("音声再生バックアップタイムアウト", "3分経過");
+          safeLog("音声再生バックアップタイムアウト", "30秒経過");
           try {
             window.currentAudio.pause();
           } catch (e) {
@@ -502,7 +525,7 @@ function playAudio(url) {
           isPlayingAudio = false;
           resolve();
         }
-      }, 180000); // 3分
+      }, 30000); // 30秒
       
     } catch (e) {
       safeLog("playAudio関数内エラー", e);
