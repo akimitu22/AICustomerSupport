@@ -2,6 +2,18 @@
 import axios from 'axios';
 import FormData from 'form-data';
 
+/* ───────── STT用プロンプト情報 ───────── */
+const STT_PROMPT = {
+  instructions: `
+    音声認識に関する指示:
+    - 「ホザナ幼稚園」は正しく認識する
+    - 「園児数」は「えんじすう」と認識し、「延字数」などに誤変換しない
+    - 「預かり保育」は正しく認識する
+    - 「願書」は「がんしょ」や「眼症」などに誤変換しない
+    - 教育用語は正確に認識する
+  `
+};
+
 /* ───────── 誤変換辞書 ───────── */
 const speechCorrectionDict = {
   /* ホザナ幼稚園 */
@@ -37,12 +49,24 @@ const speechCorrectionDict = {
   'マンテッソーリ':         'モンテッソーリ',
   'モンテッソリ':           'モンテッソーリ',
 
+  /* 園児数の誤変換対策（重要：追加・強化） */
+  'えんじ':          '園児',
+  'えんじすう':      '園児数',
+  'えんじかず':      '園児数',
+  '演じ数':          '園児数',
+  '延字数':          '園児数',
+  '延児数':          '園児数',
+  '園字数':          '園児数',
+  '園時数':          '園児数',
+  '縁児数':          '園児数',
+  'そうえんじすう':  '総園児数',
+  '総演じ数':        '総園児数',
+  '総延字数':        '総園児数',
+  '総延児数':        '総園児数',
+  '総園字数':        '総園児数',
+  '総園時数':        '総園児数',
+
   /* その他 */
-  'えんじ':         '園児',
-  'えんじすう':     '園児数',
-  'えんじかず':     'えんじすう',
-  '演じ数':   　　  '園児数',
-  'そうえんじすう': '総園児数',
   'つうえん':       '通園',
   'こうえん':       '降園',
   'とうえん':       '登園'
@@ -56,7 +80,8 @@ const KINDERGARTEN_PROMPT =
   '・「ホザナ幼稚園」は固有名詞です（誤認例: おだな／おさない）。\n' +
   '・「預かり保育」は園のサービス名です（誤認例: あつかりほいく）。\n' +
   '・「願書」は入園書類名です（誤認例: がんしょう）。\n' +
-  '・「モンテッソーリ教育」は頻出教育法です（誤認例: モンテストーリー）。\n\n' +
+  '・「モンテッソーリ教育」は頻出教育法です（誤認例: モンテストーリー）。\n' +
+  '・「園児数」は幼稚園の在籍人数を表す用語です（誤認例: 延字数／園時数）。\n\n' +
   '===== 出力上の禁止事項 =====\n' +
   '※ 出力テキストに【名前】のような話者ラベルや Speaker タグを付けないでください。\n';
 
@@ -68,7 +93,7 @@ function stripSpeakerLabel(text) {
   );
 }
 
-/* ───────── 誤変換補正 ───────── */
+/* ───────── 誤変換補正（STT_PROMPTに基づく実装） ───────── */
 function correctKindergartenTerms(text) {
   let corrected = text;
 
@@ -76,6 +101,14 @@ function correctKindergartenTerms(text) {
   for (const [wrong, right] of Object.entries(speechCorrectionDict)) {
     corrected = corrected.replace(new RegExp(wrong, 'g'), right);
   }
+
+  /* 園児数に関する特別チェック（STT_PROMPTの指示に対応） */
+  // 「えんじすう」「園児数」に関する特別処理
+  corrected = corrected
+    .replace(/えん(?:じ|字|時)(?:すう|数)/g, '園児数')
+    .replace(/延(?:じ|字|児)(?:すう|数)/g, '園児数')
+    .replace(/園(?:字|時)(?:すう|数)/g, '園児数')
+    .replace(/縁児(?:すう|数)/g, '園児数');
 
   /* 円⇄園 誤変換 */
   corrected = corrected
@@ -88,7 +121,30 @@ function correctKindergartenTerms(text) {
   /* ひらがなの ようちえん → 幼稚園 */
   corrected = corrected.replace(/ようちえん/g, '幼稚園');
 
+  // プロンプトの指示に基づいた後処理
+  corrected = postProcessBasedOnPrompt(corrected);
+
   return corrected;
+}
+
+/* ───────── プロンプトに基づく後処理 ───────── */
+function postProcessBasedOnPrompt(text) {
+  // STT_PROMPTの指示に基づく処理を実装
+  // プロンプト: 「園児数」は「えんじすう」と認識し、「延字数」などに誤変換しない
+  let result = text;
+  
+  // 残った可能性のある「園児数」の誤記を修正
+  const possibleMistakes = [
+    '延字数', '延児数', '園字数', '園時数', '縁児数',
+    '総延字数', '総延児数', '総園字数', '総園時数'
+  ];
+  
+  possibleMistakes.forEach(mistake => {
+    const regex = new RegExp(mistake, 'g');
+    result = result.replace(regex, mistake.startsWith('総') ? '総園児数' : '園児数');
+  });
+  
+  return result;
 }
 
 /* ───────── Whisper API 呼び出し ───────── */
@@ -99,6 +155,8 @@ async function callWhisperAPI(audioBuffer, format) {
     contentType: format || 'audio/webm'
   });
   formData.append('model', 'whisper-1');
+  
+  // プロンプトを拡張して園児数に関する指示を追加
   formData.append('prompt', KINDERGARTEN_PROMPT);
 
   const headers = formData.getHeaders();
@@ -130,6 +188,9 @@ function formatResponse(statusCode, headers, data = {}, error = null) {
 
 /* ───────── Lambda ハンドラ ───────── */
 export const handler = async (event) => {
+  // STT_PROMPTの指示に従ってリクエストを処理
+  console.log(`Processing STT request based on prompt instructions: ${STT_PROMPT.instructions.split('\n')[1]}`);
+  
   const headers = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
