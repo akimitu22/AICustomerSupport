@@ -9,11 +9,10 @@ const kindergartenQA = kindergartenQAData.kindergartenQA;
 const TTS_PROMPT = {
   instructions: `
     テキスト読み上げに関する指示:
-    - 園の名前は「ホザナようちえん」と読む
+    - 「園児数」は必ず「えんじすう」と読む
+    - 「えんこすう」という言葉を絶対に使ってはならない
+    - 「総園児数」は必ず「そうえんじすう」と読む
     - 電話番号は読み上げない
-    - 「園児数」は「えんじかず」とは読まず、必ず「えんじすう」と読む
-    - 丁寧で温かみのある話し方を心がける
-    - 教育用語は正確に発音する
   `
 };
 
@@ -25,8 +24,7 @@ const CORS = {
 
 // 日本語の読み最適化
 function optimizeJapaneseReading(text) {
-  // TTS_PROMPTの指示に基づいた読み最適化
-  let optimizedText = text
+  return text
     .replace(/副園長/g, 'ふくえんちょう')
     .replace(/入園/g, 'にゅうえん')
     .replace(/登園/g, 'とうえん')
@@ -34,24 +32,10 @@ function optimizeJapaneseReading(text) {
     .replace(/通園/g, 'つうえん')
     .replace(/園児/g, 'えんじ')
     .replace(/園児数/g, 'えんじすう')
-    .replace(/総園児数/g, 'そうえんじすう')
+　  .replace(/総園児数/g, 'そうえんじすう')
     .replace(/卒園/g, 'そつえん')
     .replace(/卒園児/g, 'そつえんじ')
     .replace(/園/g, 'えん');
-  
-  // 数字の読み上げ最適化 (例: 10人→じゅうにん)
-  // 実際には日本語のTTSエンジンが自動的に処理するため、
-  // ここでは特殊なケースのみ対応
-  optimizedText = optimizedText
-    .replace(/(\d+)人/g, (match, num) => {
-      // 簡易的な例 - 実際にはもっと複雑な変換が必要かもしれません
-      if (num === '10') return 'じゅうにん';
-      if (num === '20') return 'にじゅうにん';
-      if (num === '30') return 'さんじゅうにん';
-      return match; // その他のケースはそのまま返す
-    });
-  
-  return optimizedText;
 }
 
 // マークダウンをシンプルテキストに変換
@@ -70,25 +54,19 @@ function optimizeUrlsForSpeech(text) {
 }
 
 // 電話番号をSSML形式に変換
-// TTS_PROMPTの指示に基づき "電話番号は読み上げない" を実装
 function formatPhoneNumbers(text) {
-  // 電話番号を検出して非読み上げマークアップに置換
+  // 電話番号のパターン (例: 048-555-2301)
   return text.replace(
     /(\d{2,4})[-\s]?(\d{2,4})[-\s]?(\d{2,4})/g, 
-    '<say-as interpret-as="verbatim">電話番号省略</say-as>'
+    '<say-as interpret-as="telephone">$1-$2-$3</say-as>'
   );
 }
 
 // ポーズと抑揚を追加
 function addProsody(text) {
-  // 丁寧で温かみのある話し方を実現するためのSSML調整
   return text
     .replace(/([。、．，！？])\s*/g, '$1<break time="300ms"/>')
-    .replace(/\n+/g, '<break time="500ms"/>')
-    // 重要な情報に対して強調を追加
-    .replace(/(お申し込み|ご予約|ご来園)/g, '<emphasis level="moderate">$1</emphasis>')
-    // 声のトーンを温かみのあるものに
-    .replace(/^(.+)$/gm, '<prosody rate="0.97" pitch="+0.5%">$1</prosody>');
+    .replace(/\n+/g, '<break time="500ms"/>');
 }
 
 // テキストをSSMLに変換（統合関数）
@@ -99,18 +77,7 @@ function textToSSML(text) {
   ssml = formatPhoneNumbers(ssml);
   ssml = addProsody(ssml);
   
-  // プロンプトの指示に従ったSSMLを生成
   return `<speak>${ssml}</speak>`;
-}
-
-// Googleの音声合成APIを呼び出す際にプロンプトの内容を反映
-function getVoiceConfig() {
-  // TTS_PROMPTの指示に基づいた音声設定
-  return {
-    languageCode: 'ja-JP',
-    name: 'ja-JP-Standard-B', // 温かみのある声質の男性声
-    ssmlGender: 'NEUTRAL'
-  };
 }
 
 export const handler = async (event) => {
@@ -133,14 +100,11 @@ export const handler = async (event) => {
     /* ── Google TTS ── */
     let requestBody;
     
-    // TTS_PROMPTを考慮した音声設定
-    const voiceConfig = getVoiceConfig();
-    
     if (ssml && ssml.trim()) {
       // SSMLが提供されている場合はそれを使用
       requestBody = {
         input: { ssml: ssml.includes('<speak>') ? ssml : `<speak>${ssml}</speak>` },
-        voice: voiceConfig,
+        voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
         audioConfig: { 
           audioEncoding: 'MP3',
           speakingRate: 1.15,
@@ -154,7 +118,7 @@ export const handler = async (event) => {
       
       requestBody = {
         input: { ssml: processedSSML },
-        voice: voiceConfig,
+        voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
         audioConfig: { 
           audioEncoding: 'MP3',
           speakingRate: 1.15,
@@ -184,9 +148,6 @@ export const handler = async (event) => {
 
     /* ─ data:URL にラップ ─ */
     const audioUrl = `data:audio/mpeg;base64,${resp.audioContent}`;
-
-    // TTS_PROMPTを考慮したレスポンス処理
-    console.log(`TTS completed following the prompt instructions: ${TTS_PROMPT.instructions.trim().split('\n')[0]}...`);
 
     return {
       statusCode: 200,
