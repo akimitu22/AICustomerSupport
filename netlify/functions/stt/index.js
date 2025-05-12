@@ -1,6 +1,6 @@
 // netlify/functions/stt/index.js
-const axios = require('axios');
-const FormData = require('form-data');
+import axios from 'axios';
+import FormData from 'form-data';
 
 /* ───────── 誤変換辞書 ───────── */
 const speechCorrectionDict = {
@@ -38,9 +38,13 @@ const speechCorrectionDict = {
   'モンテッソリ':           'モンテッソーリ',
 
   /* その他 */
-  '公園':       '降園',
-  '講演':       '降園',
-  '登演':       '登園'
+  'えんじ':         '園児',
+  'えんじすう':     '園児数',
+  'そうえんじすう': '総園児数',
+  '演じ数':   　　  '園児数',
+  'つうえん':       '通園',
+  'こうえん':       '降園',
+  'とうえん':       '登園'
 };
 
 /* ───────── Whisper 用プロンプト ───────── */
@@ -124,7 +128,7 @@ function formatResponse(statusCode, headers, data = {}, error = null) {
 }
 
 /* ───────── Lambda ハンドラ ───────── */
-exports.handler = async (event) => {
+export const handler = async (event) => {
   const headers = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
