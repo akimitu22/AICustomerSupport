@@ -19,7 +19,6 @@ function optimizeJapaneseReading(text) {
     .replace(/登園/g, 'とうえん')
     .replace(/降園/g, 'こうえん')
     .replace(/通園/g, 'つうえん')
-    .replace(/他園/g, 'たえん')
     .replace(/園児/g, 'えんじ')
     .replace(/園児数/g, 'えんじすう')
 　  .replace(/総園児数/g, 'そうえんじすう')
