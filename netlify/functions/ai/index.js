@@ -1,12 +1,13 @@
 // netlify/functions/ai/index.js
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
+import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 
 // JSONファイルから直接QandA情報を読み込み
-const kindergartenQA = require('./QandA.json').kindergartenQA;
+import qandaData from './QandA.json' assert { type: 'json' };
+const kindergartenQA = qandaData.kindergartenQA;
 
-exports.handler = async function(event, context) {
+export const handler = async function(event, context) {
   // Preflight requestへの対応
   if (event.httpMethod === 'OPTIONS') {
     return {
@@ -109,7 +110,8 @@ ${qaContext}
 ※電話番号は絶対に読み上げないでください。
 ※お問い合わせには「ホームページのお問い合わせフォームからどうぞ」と案内してください。
 ※「電話でのお問い合わせ」という言葉や電話番号は絶対に使わないでください。
-不明点は「園へお問い合わせください」と案内してください。`
+不明点は「園へお問い合わせください」と案内してください。
+※お問合せ内容は幼稚園に関することですので。「えんちょう」は「延長保育」か「園長先生」のことと解釈し、「がんしょ(う)」は「顔症」や「眼症」ではなく、「(入園)願書」のことと理解し、幼稚園用語以外に受け取って誤った解釈は絶対しないでください。`
             },
             { role: 'user', content: message }
           ],
