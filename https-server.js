@@ -1,4 +1,5 @@
-﻿import express from 'express';
+﻿// https-server.js
+import express from 'express';
 import multer from 'multer';
 import axios from 'axios';
 import fs from 'fs';
@@ -25,7 +26,7 @@ const STAGES = {
   INTEREST: 'interest',
   CONSIDERATION: 'consideration',
   DESIRE: 'desire',
-  ACTION: 'action'
+  ACTION: 'action',
 };
 
 /* ───── Whisper STT ───── */
@@ -36,21 +37,17 @@ app.post('/stt', upload.single('audio'), async (req, res) => {
     const fd = new FormData();
     fd.append('file', fs.createReadStream(audioPath), {
       filename: path.basename(audioPath),
-      contentType: 'audio/webm'
+      contentType: 'audio/webm',
     });
     fd.append('model', 'whisper-1');
     fd.append('language', 'ja');
 
-    const { data } = await axios.post(
-      'https://api.openai.com/v1/audio/transcriptions',
-      fd,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          ...fd.getHeaders()
-        }
-      }
-    );
+    const { data } = await axios.post('https://api.openai.com/v1/audio/transcriptions', fd, {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        ...fd.getHeaders(),
+      },
+    });
 
     res.json({ text: data.text?.toLowerCase() || '' });
   } catch (e) {
@@ -79,7 +76,7 @@ function systemPrompt() {
 ※お問い合わせには「ホームページのお問い合わせフォームからどうぞ」と案内してください。
 ※「電話でのお問い合わせ」という言葉や電話番号は絶対に使わないでください。
 
-不明点は「園へお問い合わせください」と案内してください。また、絶対に「入園」を「入院」と誤変換して理解しないでください。幼稚園へのお問い合わせに「入院」は絶対にありえません。それと「眼症」も絶対にありえません。それは100％「願書」の意味です。また「扱い保育」という言葉も存在しません。日本語として不自然に感じた場合は一番近いものを探して解釈してください。たとえば「扱い保育」は「預かり保育」を意味する、とそう解釈してください。要するに、すべて幼稚園関係の言葉だと幼稚園関係用語に変換して対応してください。仮にそれがひやかしなどで、幼稚園関係のものでないとしても、幼稚園以外の質問に回答する必要はありません。`;
+不明点は「園へお問い合わせください」と案内してください。また、絶対に「入園」を「入院」と誤変換して理解しないでください。幼稚園へのお問い合わせに「入院」は絶対にありえません。それと「眼症」も絶対にありえません。それは100％「願書」の意味です。また「扱い保育」という言葉も存在しません。日本語として不自然に感じた場合は一番近いものを探して解釈してください。たとえば「扱い保育」は「預かり保育」を意味する、「幼い幼稚園」は「ホザナ幼稚園」とそう解釈してください。要するに、すべてホザナ幼稚園関係の言葉に変換して対応してください。仮にそれがひやかしなどで、ホザナ幼稚園関係のものでないとしても、ホザナ幼稚園以外の質問に回答する必要はありません。`;
 }
 
 app.post('/ai', async (req, res) => {
@@ -88,7 +85,7 @@ app.post('/ai', async (req, res) => {
     if (!message?.trim()) return res.status(400).json({ error: 'empty' });
 
     const sid = sessionId || `s_${Date.now()}`;
-    const sess = sessionStorage[sid] ||= { history: [], stage: STAGES.INITIAL };
+    const sess = (sessionStorage[sid] ||= { history: [], stage: STAGES.INITIAL });
     sess.history.push({ role: 'user', content: message });
     sess.stage = analyzeStage(message, sess.stage);
 
@@ -99,18 +96,18 @@ app.post('/ai', async (req, res) => {
         messages: [
           {
             role: 'system',
-            content: systemPrompt()
+            content: systemPrompt(),
           },
-          ...sess.history.slice(-5)
+          ...sess.history.slice(-5),
         ],
         max_tokens: 400,
-        temperature: 0.7
+        temperature: 0.7,
       },
       { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
     );
 
-    const reply = data.choices?.[0]?.message?.content
-      || '申し訳ありません、回答を生成できませんでした。';
+    const reply =
+      data.choices?.[0]?.message?.content || '申し訳ありません、回答を生成できませんでした。';
 
     sess.history.push({ role: 'assistant', content: reply });
     res.json({ reply, sessionId: sid, stage: sess.stage });
@@ -131,7 +128,7 @@ function convertMarkdownToSSML(text) {
 
 function formatPhoneNumbers(text) {
   return text.replace(
-    /(\d{2,4})[-\s]?(\d{2,4})[-\s]?(\d{2,4})/g, 
+    /(\d{2,4})[-\s]?(\d{2,4})[-\s]?(\d{2,4})/g,
     '<say-as interpret-as="telephone">$1-$2-$3</say-as>'
   );
 }
@@ -150,15 +147,14 @@ async function synthesize(text) {
     .replace(/登園/g, 'とうえん')
     .replace(/降園/g, 'こうえん')
     .replace(/通園/g, 'つうえん')
-    .replace(/卒園/g, 'そつえん')
-    .replace(/園児数/g, 'えんじすう')
     .replace(/園児/g, 'えんじ')
-    .replace(/園/g, 'えん');
+    .replace(/園児数/g, 'えんじすう')
+    .replace(/園/g, 'えん')
 
   let processedText = convertMarkdownToSSML(fixed);
   processedText = formatPhoneNumbers(processedText);
   processedText = optimizeTextForSpeech(processedText);
-  
+
   const ssmlText = `<speak>${processedText}</speak>`;
 
   try {
@@ -167,12 +163,12 @@ async function synthesize(text) {
       {
         input: { ssml: ssmlText },
         voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
-        audioConfig: { 
-          audioEncoding: 'MP3', 
-          speakingRate: 1.15,
+        audioConfig: {
+          audioEncoding: 'MP3',
+          speakingRate: 1.12,
           pitch: 0.0,
-          volumeGainDb: 0.0
-        }
+          volumeGainDb: 0.0,
+        },
       }
     );
 
@@ -185,11 +181,11 @@ async function synthesize(text) {
         {
           input: { ssml: ssmlText },
           voice: { languageCode: 'ja-JP', name: 'ja-JP-Standard-B' },
-          audioConfig: { 
-            audioEncoding: 'MP3', 
+          audioConfig: {
+            audioEncoding: 'MP3',
             speakingRate: 1.15,
-            pitch: 0.0
-          }
+            pitch: 0.0,
+          },
         }
       );
       return `data:audio/mpeg;base64,${data.audioContent}`;
@@ -199,7 +195,7 @@ async function synthesize(text) {
         {
           input: { ssml: ssmlText },
           voice: { languageCode: 'ja-JP' },
-          audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 }
+          audioConfig: { audioEncoding: 'MP3', speakingRate: 1.15 },
         }
       );
       return `data:audio/mpeg;base64,${data.audioContent}`;
@@ -210,11 +206,11 @@ async function synthesize(text) {
 app.post('/tts', async (req, res) => {
   try {
     const { text, ssml } = req.body;
-    
+
     if (!text?.trim() && !ssml?.trim()) {
       return res.status(400).json({ error: 'empty' });
     }
-    
+
     let audioUrl;
     if (ssml && ssml.trim()) {
       const finalSSML = ssml.includes('<speak>') ? ssml : `<speak>${ssml}</speak>`;
@@ -223,19 +219,19 @@ app.post('/tts', async (req, res) => {
         {
           input: { ssml: finalSSML },
           voice: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-B' },
-          audioConfig: { 
-            audioEncoding: 'MP3', 
+          audioConfig: {
+            audioEncoding: 'MP3',
             speakingRate: 1.15,
             pitch: 0.0,
-            volumeGainDb: 0.0
-          }
+            volumeGainDb: 0.0,
+          },
         }
       );
       audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
     } else {
       audioUrl = await synthesize(text);
     }
-    
+
     res.json({ audioUrl });
   } catch (e) {
     console.error('TTS error:', e.response?.data || e.message);
@@ -243,8 +239,9 @@ app.post('/tts', async (req, res) => {
   }
 });
 
-// CommonJSのexportsからESMのexportに変更
-export default app;
+// デフォルトエクスポートに変更
+const server = app;
+export default server;
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
