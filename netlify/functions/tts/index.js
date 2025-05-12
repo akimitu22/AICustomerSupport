@@ -1,8 +1,9 @@
 // netlify/functions/tts/index.js
-const fetch = require('node-fetch');
+import fetch from 'node-fetch';
 
-// JSONファイルから直接読み込み
-const kindergartenQA = require('./QandA.json').kindergartenQA;
+// JSONファイルを動的にインポート
+import kindergartenQAData from './QandA.json' assert { type: 'json' };
+const kindergartenQA = kindergartenQAData.kindergartenQA;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -19,9 +20,11 @@ function optimizeJapaneseReading(text) {
     .replace(/降園/g, 'こうえん')
     .replace(/通園/g, 'つうえん')
     .replace(/他園/g, 'たえん')
-    .replace(/卒園/g, 'そつえん')
-    .replace(/園児数/g, 'えんじすう')
     .replace(/園児/g, 'えんじ')
+    .replace(/園児数/g, 'えんじすう')
+　  .replace(/総園児数/g, 'そうえんじすう')
+    .replace(/卒園/g, 'そつえん')
+    .replace(/卒園児/g, 'そつえんじ')
     .replace(/園/g, 'えん');
 }
 
@@ -67,7 +70,7 @@ function textToSSML(text) {
   return `<speak>${ssml}</speak>`;
 }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   // ─ OPTIONS
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers: CORS, body: '' };
