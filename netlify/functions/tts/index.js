@@ -10,10 +10,16 @@ const TTS_PROMPT = {
   instructions: `
     テキスト読み上げに関する指示:
     - 「園児数」は必ず「えんじすう」と読む
-    - 「えんこすう」という言葉を絶対に使ってはならない
+    - 「えんじかず」「えんこすう」という言葉を絶対に使ってはならない
     - 「総園児数」は必ず「そうえんじすう」と読む
     - 電話番号は読み上げない
   `
+};
+
+// 禁忌語リスト - プロンプトから抽出
+const FORBIDDEN_TERMS = {
+  'えんじかず': 'えんじすう',
+  'えんこすう': 'えんじすう'
 };
 
 const CORS = {
@@ -24,7 +30,7 @@ const CORS = {
 
 // 日本語の読み最適化
 function optimizeJapaneseReading(text) {
-  return text
+  let result = text
     .replace(/副園長/g, 'ふくえんちょう')
     .replace(/入園/g, 'にゅうえん')
     .replace(/登園/g, 'とうえん')
@@ -36,6 +42,13 @@ function optimizeJapaneseReading(text) {
     .replace(/卒園/g, 'そつえん')
     .replace(/卒園児/g, 'そつえんじ')
     .replace(/園/g, 'えん');
+    
+  // プロンプト指示に基づく禁忌語の処理
+  Object.entries(FORBIDDEN_TERMS).forEach(([forbidden, replacement]) => {
+    result = result.replace(new RegExp(forbidden, 'g'), replacement);
+  });
+  
+  return result;
 }
 
 // マークダウンをシンプルテキストに変換
@@ -55,10 +68,10 @@ function optimizeUrlsForSpeech(text) {
 
 // 電話番号をSSML形式に変換
 function formatPhoneNumbers(text) {
-  // 電話番号のパターン (例: 048-555-2301)
+  // プロンプト指示: 電話番号は読み上げない
   return text.replace(
     /(\d{2,4})[-\s]?(\d{2,4})[-\s]?(\d{2,4})/g, 
-    '<say-as interpret-as="telephone">$1-$2-$3</say-as>'
+    '<break time="300ms"/>' // 電話番号を無音に置き換え
   );
 }
 
