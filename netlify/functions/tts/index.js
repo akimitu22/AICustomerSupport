@@ -14,15 +14,14 @@ const CORS = {
 function optimizeJapaneseReading(text) {
   return text
     .replace(/副園長/g, 'ふくえんちょう')
-　  .replace(/園長/g, 'えんちょう')　
     .replace(/入園/g, 'にゅうえん')
+    .replace(/園庭/g, 'えんてい')
     .replace(/登園/g, 'とうえん')
     .replace(/降園/g, 'こうえん')
-    .replace(/通園/g, 'つうえん')
     .replace(/他園/g, 'たえん')
     .replace(/卒園/g, 'そつえん')
-    .replace(/園庭/g, 'えんてい')
-    .replace(/園/g, 'えん');
+    .replace(/園/g, 'えん')
+    .replace(/園子/g, 'そのこ');
 }
 
 // マークダウンをシンプルテキストに変換
@@ -36,14 +35,15 @@ function cleanMarkdown(text) {
 
 // URLを読みやすくする
 function optimizeUrlsForSpeech(text) {
-  return text.replace(/https?:\/\/[^\s]+/g, 'ホームページのリンク');
+  return text
+    .replace(/https?:\/\/[^\s]+/g, 'ホームページのリンク');
 }
 
 // 電話番号をSSML形式に変換
 function formatPhoneNumbers(text) {
   // 電話番号のパターン (例: 048-555-2301)
   return text.replace(
-    /(\d{2,4})[-\s]?(\d{2,4})[-\s]?(\d{2,4})/g,
+    /(\d{2,4})[-\s]?(\d{2,4})[-\s]?(\d{2,4})/g, 
     '<say-as interpret-as="telephone">$1-$2-$3</say-as>'
   );
 }
@@ -62,11 +62,11 @@ function textToSSML(text) {
   ssml = optimizeUrlsForSpeech(ssml);
   ssml = formatPhoneNumbers(ssml);
   ssml = addProsody(ssml);
-
+  
   return `<speak>${ssml}</speak>`;
 }
 
-exports.handler = async event => {
+exports.handler = async (event) => {
   // ─ OPTIONS
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers: CORS, body: '' };
@@ -75,7 +75,7 @@ exports.handler = async event => {
   try {
     const requestData = JSON.parse(event.body || '{}');
     const { text = '', ssml = '' } = requestData;
-
+    
     if (!text.trim() && !ssml.trim()) {
       throw new Error('text is empty');
     }
@@ -85,31 +85,31 @@ exports.handler = async event => {
 
     /* ── Google TTS ── */
     let requestBody;
-
+    
     if (ssml && ssml.trim()) {
       // SSMLが提供されている場合はそれを使用
       requestBody = {
         input: { ssml: ssml.includes('<speak>') ? ssml : `<speak>${ssml}</speak>` },
         voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
-        audioConfig: {
+        audioConfig: { 
           audioEncoding: 'MP3',
           speakingRate: 1.15,
           pitch: 0.0,
-          volumeGainDb: 0.0,
+          volumeGainDb: 0.0
         },
       };
     } else {
       // 通常のテキスト入力の前処理
       const processedSSML = textToSSML(text);
-
+      
       requestBody = {
         input: { ssml: processedSSML },
         voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
-        audioConfig: {
+        audioConfig: { 
           audioEncoding: 'MP3',
           speakingRate: 1.15,
           pitch: 0.0,
-          volumeGainDb: 0.0,
+          volumeGainDb: 0.0
         },
       };
     }
@@ -121,11 +121,14 @@ exports.handler = async event => {
       console.log('Voice model specification failed, using default voice');
     }
 
-    const resp = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${key}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    }).then(r => r.json());
+    const resp = await fetch(
+      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      }
+    ).then(r => r.json());
 
     if (!resp.audioContent) throw new Error(resp.error?.message || 'no audio');
 
