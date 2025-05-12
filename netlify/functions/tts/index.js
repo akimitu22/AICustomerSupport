@@ -5,21 +5,16 @@ import fetch from 'node-fetch';
 import kindergartenQAData from './QandA.json' assert { type: 'json' };
 const kindergartenQA = kindergartenQAData.kindergartenQA;
 
-// 追加するプロンプト情報
+// 追加するプロンプト情報（実装と連携）
 const TTS_PROMPT = {
   instructions: `
     テキスト読み上げに関する指示:
-    - 「園児数」は必ず「えんじすう」と読む
-    - 「えんじかず」「えんこすう」という言葉を絶対に使ってはならない
-    - 「総園児数」は必ず「そうえんじすう」と読む
+    - 園の名前は「ホザナようちえん」と読む
     - 電話番号は読み上げない
+    - 数字は適切に読み上げる（例: 10人→じゅうにん）
+    - 「園児数」は必ず「えんじすう」と読み、決して「えんじかず」と読まない
+    - 「総園児数」は必ず「そうえんじすう」と読む
   `
-};
-
-// 禁忌語リスト - プロンプトから抽出
-const FORBIDDEN_TERMS = {
-  'えんじかず': 'えんじすう',
-  'えんこすう': 'えんじすう'
 };
 
 const CORS = {
@@ -28,27 +23,23 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-// 日本語の読み最適化
+// 日本語の読み最適化（TTS_PROMPTに基づく実装）
 function optimizeJapaneseReading(text) {
-  let result = text
+  // プロンプトの指示を実装
+  return text
+    .replace(/ホザナ幼稚園/g, 'ホザナようちえん') // プロンプト指示: 園の名前は「ホザナようちえん」と読む
     .replace(/副園長/g, 'ふくえんちょう')
     .replace(/入園/g, 'にゅうえん')
     .replace(/登園/g, 'とうえん')
     .replace(/降園/g, 'こうえん')
     .replace(/通園/g, 'つうえん')
-    .replace(/園児/g, 'えんじ')
-    .replace(/園児数/g, 'えんじすう')
-　  .replace(/総園児数/g, 'そうえんじすう')
+    .replace(/他園/g, 'たえん')
     .replace(/卒園/g, 'そつえん')
     .replace(/卒園児/g, 'そつえんじ')
+    .replace(/園児数/g, 'えんじすう')     // プロンプト指示: 園児数は「えんじすう」と読む
+    .replace(/総園児数/g, 'そうえんじすう') // プロンプト指示: 総園児数は「そうえんじすう」と読む
+    .replace(/園児/g, 'えんじ')
     .replace(/園/g, 'えん');
-    
-  // プロンプト指示に基づく禁忌語の処理
-  Object.entries(FORBIDDEN_TERMS).forEach(([forbidden, replacement]) => {
-    result = result.replace(new RegExp(forbidden, 'g'), replacement);
-  });
-  
-  return result;
 }
 
 // マークダウンをシンプルテキストに変換
@@ -66,12 +57,12 @@ function optimizeUrlsForSpeech(text) {
     .replace(/https?:\/\/[^\s]+/g, 'ホームページのリンク');
 }
 
-// 電話番号をSSML形式に変換
+// 電話番号をSSML形式に変換（プロンプト指示: 電話番号は読み上げない）
 function formatPhoneNumbers(text) {
-  // プロンプト指示: 電話番号は読み上げない
+  // 電話番号を検出して無音に置き換え
   return text.replace(
     /(\d{2,4})[-\s]?(\d{2,4})[-\s]?(\d{2,4})/g, 
-    '<break time="300ms"/>' // 電話番号を無音に置き換え
+    '<break time="300ms"/>' // プロンプト指示に基づき無音に置き換え
   );
 }
 
@@ -84,11 +75,15 @@ function addProsody(text) {
 
 // テキストをSSMLに変換（統合関数）
 function textToSSML(text) {
+  // プロンプト指示に従った変換処理を実行
   let ssml = optimizeJapaneseReading(text);
   ssml = cleanMarkdown(ssml);
   ssml = optimizeUrlsForSpeech(ssml);
   ssml = formatPhoneNumbers(ssml);
   ssml = addProsody(ssml);
+  
+  // 数字の読み上げ最適化（プロンプト指示: 数字は適切に読み上げる）
+  // SSMLの特性で、基本的な数字の読み上げはGoogle TTSが自動対応
   
   return `<speak>${ssml}</speak>`;
 }
@@ -126,7 +121,7 @@ export const handler = async (event) => {
         },
       };
     } else {
-      // 通常のテキスト入力の前処理
+      // 通常のテキスト入力の前処理（プロンプト指示に基づく）
       const processedSSML = textToSSML(text);
       
       requestBody = {
