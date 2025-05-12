@@ -15,13 +15,14 @@ function optimizeJapaneseReading(text) {
   return text
     .replace(/副園長/g, 'ふくえんちょう')
     .replace(/入園/g, 'にゅうえん')
-    .replace(/園庭/g, 'えんてい')
     .replace(/登園/g, 'とうえん')
     .replace(/降園/g, 'こうえん')
+    .replace(/通園/g, 'つうえん')
     .replace(/他園/g, 'たえん')
     .replace(/卒園/g, 'そつえん')
-    .replace(/園/g, 'えん')
-    .replace(/園子/g, 'そのこ');
+    .replace(/園児数/g, 'えんじすう')
+    .replace(/園児/g, 'えんじ')
+    .replace(/園/g, 'えん');
 }
 
 // マークダウンをシンプルテキストに変換
