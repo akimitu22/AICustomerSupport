@@ -1,12 +1,16 @@
-﻿const express = require('express');
-const multer = require('multer');
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
-const FormData = require('form-data');
-const { exec } = require('child_process');
-const { promisify } = require('util');
-require('dotenv/config');
+﻿import express from 'express';
+import multer from 'multer';
+import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
+import FormData from 'form-data';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import 'dotenv/config';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const execPromise = promisify(exec);
 const app = express();
@@ -143,13 +147,14 @@ async function synthesize(text) {
   const fixed = text
     .replace(/副園長/g, 'ふくえんちょう')
     .replace(/入園/g, 'にゅうえん')
-    .replace(/園長/g, 'えんちょう')
-    .replace(/幼稚園/g, 'ようちえん')
-    .replace(/園庭/g, 'えんてい')
-    .replace(/園児/g, 'えんじ')
+    .replace(/登園/g, 'とうえん')
+    .replace(/降園/g, 'こうえん')
+    .replace(/通園/g, 'つうえん')
     .replace(/他園/g, 'たえん')
-    .replace(/園/g, 'えん')
-    .replace(/大坪園子/g, 'おおつぼそのこ');
+    .replace(/卒園/g, 'そつえん')
+    .replace(/園児数/g, 'えんじすう')
+    .replace(/園児/g, 'えんじ')
+    .replace(/園/g, 'えん');
 
   let processedText = convertMarkdownToSSML(fixed);
   processedText = formatPhoneNumbers(processedText);
@@ -239,7 +244,8 @@ app.post('/tts', async (req, res) => {
   }
 });
 
-module.exports = app;
+// CommonJSのexportsからESMのexportに変更
+export default app;
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
