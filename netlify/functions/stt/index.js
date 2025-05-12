@@ -5,48 +5,48 @@ const FormData = require('form-data');
 /* ───────── 誤変換辞書 ───────── */
 const speechCorrectionDict = {
   /* ホザナ幼稚園 */
-  おだな幼稚園: 'ホザナ幼稚園',
-  おさない幼稚園: 'ホザナ幼稚園',
-  幼い幼稚園: 'ホザナ幼稚園',
-  小棚幼稚園: 'ホザナ幼稚園',
-  児玉幼稚園: 'ホザナ幼稚園',
+  'おだな幼稚園': 'ホザナ幼稚園',
+  'おさない幼稚園': 'ホザナ幼稚園',
+  '幼い幼稚園':   'ホザナ幼稚園',
+  '小棚幼稚園':   'ホザナ幼稚園',
+  '児玉幼稚園':   'ホザナ幼稚園',
 
   /* 預かり保育 */
-  あつかいほいく: '預かり保育',
-  あつがりほいく: '預かり保育',
-  扱い保育: '預かり保育',
-  暑がり保育: '預かり保育',
+  'あつかいほいく': '預かり保育',
+  'あつがりほいく': '預かり保育',
+  '扱い保育':       '預かり保育',
+  '暑がり保育':     '預かり保育',
 
   /* 願書 */
-  がんしょう: '願書',
-  かんしょう: '願書',
-  干渉: '願書',
-  眼症: '願書',
-  顔症: '願書',
-  元祥: '願書',
-  がんしょ: '願書',
-  かんしょ: '願書',
-  幹書: '願書',
-  みきしょ: '願書',
+  'がんしょう': '願書',
+  'かんしょう': '願書',
+  '干渉':       '願書',
+  '眼症':       '願書',
+  '顔症':       '願書',
+  '元祥':       '願書',
+  'がんしょ':   '願書',
+  'かんしょ':   '願書',
+  '幹書':       '願書',
+  'みきしょ':   '願書',
 
   /* モンテッソーリゆれ & 誤認識 */
-  モンテストーリー: 'モンテッソーリ',
-  モンテストーリー教育: 'モンテッソーリ教育',
-  モンテソーリ: 'モンテッソーリ',
-  モンテソリー: 'モンテッソーリ',
-  マンテッソーリ: 'モンテッソーリ',
-  モンテッソリ: 'モンテッソーリ',
+  'モンテストーリー':       'モンテッソーリ',
+  'モンテストーリー教育':   'モンテッソーリ教育',
+  'モンテソーリ':           'モンテッソーリ',
+  'モンテソリー':           'モンテッソーリ',
+  'マンテッソーリ':         'モンテッソーリ',
+  'モンテッソリ':           'モンテッソーリ',
 
   /* その他 */
-  こうえん: '降園',
-  つうえん: '通園',
-  とうえん: '登園',
+  '公園':       '降園',
+  '講演':       '降園',
+  '登演':       '登園'
 };
 
 /* ───────── Whisper 用プロンプト ───────── */
 const KINDERGARTEN_PROMPT =
   '===== 音声認識コンテキスト：ホザナ幼稚園 入園案内 =====\n' +
-  'この会話はホザナ幼稚園の入園手続き・モンテッソーリ教育に関する Q&A です。したがって、発話者の会話に出てくる単語は基本的に幼稚園用語と考えて対応してください。たとえば、「えんちょう」は、「園長先生」か「延長保育(預かり保育)」の意味で。「がんしょ(う)」は、「眼症」や「顔症」などの医療用語ではなく、「(入園)願書」のことという具合に理解してください。\n\n' +
+  'この会話はホザナ幼稚園の入園手続き・モンテッソーリ教育に関する Q&A です。\n\n' +
   '===== 用語ガイド =====\n' +
   '・「ホザナ幼稚園」は固有名詞です（誤認例: おだな／おさない）。\n' +
   '・「預かり保育」は園のサービス名です（誤認例: あつかりほいく）。\n' +
@@ -74,8 +74,8 @@ function correctKindergartenTerms(text) {
 
   /* 円⇄園 誤変換 */
   corrected = corrected
-    .replace(/(\d+)([万千百十]?)円/g, '$1$2円') // 数字＋円はそのまま
-    .replace(/([^\d０-９万千百十])円/g, '$1園'); // それ以外＋円→園
+    .replace(/(\d+)([万千百十]?)円/g, '$1$2円')          // 数字＋円はそのまま
+    .replace(/([^\d０-９万千百十])円/g, '$1園');            // それ以外＋円→園
 
   /* しますから？→しますか？ */
   corrected = corrected.replace(/しますから\?/g, 'しますか?');
@@ -91,19 +91,21 @@ async function callWhisperAPI(audioBuffer, format) {
   const formData = new FormData();
   formData.append('file', audioBuffer, {
     filename: 'audio.webm',
-    contentType: format || 'audio/webm',
+    contentType: format || 'audio/webm'
   });
   formData.append('model', 'whisper-1');
   formData.append('prompt', KINDERGARTEN_PROMPT);
 
   const headers = formData.getHeaders();
-  headers['Content-Length'] = await new Promise(res => formData.getLength((_, len) => res(len)));
+  headers['Content-Length'] = await new Promise(res =>
+    formData.getLength((_, len) => res(len))
+  );
 
   return axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, ...headers },
     maxBodyLength: 25 * 1024 * 1024,
     maxContentLength: 25 * 1024 * 1024,
-    timeout: 25000,
+    timeout: 25000
   });
 }
 
@@ -122,12 +124,12 @@ function formatResponse(statusCode, headers, data = {}, error = null) {
 }
 
 /* ───────── Lambda ハンドラ ───────── */
-exports.handler = async event => {
+exports.handler = async (event) => {
   const headers = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS'
   };
 
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
@@ -149,14 +151,15 @@ exports.handler = async event => {
     /* Whisper 呼び出し */
     const resp = await callWhisperAPI(audioBuffer, req.format);
     let recognized = resp.data.text || '';
-    recognized = stripSpeakerLabel(recognized); // ← 話者ラベルを除去
+    recognized = stripSpeakerLabel(recognized);        // ← 話者ラベルを除去
     const corrected = correctKindergartenTerms(recognized);
 
     return formatResponse(200, headers, {
       text: corrected,
       originalText: recognized,
-      timestamp: Date.now(),
+      timestamp: Date.now()
     });
+
   } catch (err) {
     const status = err.response?.status || 500;
     const detail = err.response?.data || err.message;
