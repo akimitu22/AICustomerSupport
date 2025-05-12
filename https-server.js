@@ -150,7 +150,6 @@ async function synthesize(text) {
     .replace(/登園/g, 'とうえん')
     .replace(/降園/g, 'こうえん')
     .replace(/通園/g, 'つうえん')
-    .replace(/他園/g, 'たえん')
     .replace(/卒園/g, 'そつえん')
     .replace(/園児数/g, 'えんじすう')
     .replace(/園児/g, 'えんじ')
