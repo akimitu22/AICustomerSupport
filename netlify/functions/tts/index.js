@@ -202,8 +202,10 @@ function optimizeNumbers(text) {
     .replace(/(\d{1,2})時(\d{1,2})分/g, '<say-as interpret-as="time" format="hm">$1:$2</say-as>')
     // パーセントの読み上げ最適化
     .replace(/(\d+)%/g, '$1<say-as interpret-as="characters">%</say-as>')
-    // 金額の読み上げ最適化
-    .replace(/(\d+)円/g, '<say-as interpret-as="cardinal">$1</say-as>円');
+    // 金額の読み上げ最適化 - より多くのパターンに対応
+    .replace(/(\d{1,3}(,\d{3})*|\d+)(円|万円)/g, '<say-as interpret-as="cardinal">$1</say-as>$3')
+    // 一般的な数値の読み上げ最適化
+    .replace(/(\d+)([^\d\s%円年月日時分秒])/g, '<say-as interpret-as="cardinal">$1</say-as>$2');
 }
 
 /**
@@ -236,14 +238,55 @@ function textToSSML(text) {
     .replace(/そえんちょう/g, 'ふくえんちょう') // 副園長の別の誤読対策
     .replace(/がんしょう/g, 'がんしょ'); // 願書の読み間違い対策
 
-  // 6. ポーズと抑揚を追加
+  // 6. 金額情報の特別処理 - 入園料や保育料など
+  ssml = handleFinancialInfo(ssml);
+  
+  // 7. ポーズと抑揚を追加
   ssml = addProsody(ssml);
   
-  // 7. 数値の読み上げ最適化
+  // 8. 数値の読み上げ最適化
   ssml = optimizeNumbers(ssml);
   
   // 最終的なSSML形式に整形
   return `<speak>${ssml}</speak>`;
+}
+
+/**
+ * 金額情報の特別処理
+ * 入園料や保育料などの金額情報を適切に処理する
+ * @param {string} text - 変換対象のテキスト
+ * @return {string} - 金額情報が最適化されたテキスト
+ */
+function handleFinancialInfo(text) {
+  // 金額表現を正確に読み上げるための処理
+  let processed = text;
+  
+  // 入園料や保育料などの金額表現を検出して適切に処理
+  const amountPatterns = [
+    // 入園料パターン
+    /入園料は(\d{1,3}(,\d{3})*|\d+)円/g,
+    // 保育料パターン
+    /保育料は(\d{1,3}(,\d{3})*|\d+)円/g,
+    // 月額料金パターン
+    /月額(\d{1,3}(,\d{3})*|\d+)円/g,
+    // 費用パターン
+    /費用は(\d{1,3}(,\d{3})*|\d+)円/g
+  ];
+  
+  // 各パターンに対応
+  for (const pattern of amountPatterns) {
+    processed = processed.replace(pattern, (match, amount) => {
+      // 金額を強調して読み上げる
+      return match.replace(amount, `<emphasis level="moderate">${amount}</emphasis>`);
+    });
+  }
+  
+  // 内訳の金額表現も適切に処理
+  processed = processed.replace(/(\d{1,3}(,\d{3})*|\d+)円/g, (match, amount) => {
+    return match.replace(amount, `<say-as interpret-as="cardinal">${amount}</say-as>`);
+  });
+  
+  return processed;
 }
 
 /**
