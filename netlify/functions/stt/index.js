@@ -162,6 +162,8 @@ function stripSpeakerLabel(text) {
 
 /* ───────── ユーティリティ関数 ───────── */
 // メタ文字をエスケープする関数
+const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\/* ───────── ユーティリティ関数 ───────── */
+// メタ文字をエスケープする関数
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // 日本語文字（漢字・ひらがな・カタカナ）を表す正規表現
 const WORD = '[\\p{Script=Hani}\\p{Script=Hira}\\p{Script=Kana}]';
@@ -182,7 +184,47 @@ function correctKindergartenTerms(text) {
   // マーカーを「延長保育」に戻す
   out = out
     .replace(/##ENCHOHOKU##/g, '延長保育')
-    .replace(/##ENCHOHOIKU##/g, '延長保育');
+    .replace(/##ENCHOHOIKU##/g, '延長保育');');
+// 日本語文字（漢字・ひらがな・カタカナ）を表す正規表現 - Node.js 12以上と互換性あり
+const WORD = '[一-龯ぁ-んァ-ン]';  // 広義の日本語文字
+
+/* ───────── 誤変換補正関数 ───────── */
+function correctKindergartenTerms(text) {
+  let out = text;
+
+  /* 前処理 - えんちょうの単体処理を確実にするための特別ルール */
+  // 先に「えんちょうほいく」「えんちょう保育」を一時的なマーカーに置換（同一キーに統一）
+  out = out
+    .replace(/えんちょうほいく/g, '##ENCHOHOIKU##')
+    .replace(/えんちょう保育/g, '##ENCHOHOIKU##');
+  
+  // 単体の「えんちょう」は必ず「園長」に変換（単語境界考慮 - 互換性のある方法）
+  out = out.replace(/(?:^|[^一-龯ぁ-んァ-ン])えんちょう(?=$|[^一-龯ぁ-んァ-ン])/g, '/* ───────── ユーティリティ関数 ───────── */
+// メタ文字をエスケープする関数
+const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// 日本語文字（漢字・ひらがな・カタカナ）を表す正規表現
+const WORD = '[\\p{Script=Hani}\\p{Script=Hira}\\p{Script=Kana}]';
+
+/* ───────── 誤変換補正関数 ───────── */
+function correctKindergartenTerms(text) {
+  let out = text;
+
+  /* 前処理 - えんちょうの単体処理を確実にするための特別ルール */
+  // 先に「えんちょうほいく」「えんちょう保育」を一時的なマーカーに置換
+  out = out
+    .replace(/えんちょうほいく/g, '##ENCHOHOKU##')
+    .replace(/えんちょう保育/g, '##ENCHOHOIKU##');
+  
+  // 単体の「えんちょう」は必ず「園長」に変換（単語境界考慮）
+  out = out.replace(/\bえんちょう\b/gu, '園長');
+  
+  // マーカーを「延長保育」に戻す
+  out = out
+    .replace(/##ENCHOHOKU##/g, '延長保育')
+    .replace(/##ENCHOHOIKU##/g, '延長保育');'.replace(/えんちょう/g, '園長'));
+  
+  // マーカーを「延長保育」に戻す
+  out = out.replace(/##ENCHOHOIKU##/g, '延長保育');
 
   /* 基本辞書置換 - 優先度→長さの降順でソート */
   const sortedEntries = Object.entries(speechCorrectionDict)
@@ -190,14 +232,14 @@ function correctKindergartenTerms(text) {
     
   for (const [wrong, right] of sortedEntries) {
     // 単語の長さによって置換パターンを変える
-    const pattern = wrong.length <= 2
-      // 前後が日本語文字でないことを保証（短語用）
-      ? new RegExp(`(?:^|[^${WORD}])${esc(wrong)}(?=$|[^${WORD}])`, 'gu')
+    const pat = wrong.length <= 2
+      // 前後が日本語文字でないことを保証（短語用）- 互換性のある方法
+      ? new RegExp(`(?:^|[^${WORD}])${esc(wrong)}(?=$|[^${WORD}])`, 'g')
       // 普通の単語はエスケープして置換
-      : new RegExp(esc(wrong), 'gu');
+      : new RegExp(esc(wrong), 'g');
 
     // 置換処理
-    out = out.replace(pattern, m => {
+    out = out.replace(pat, m => {
       // 先頭を保持して置換（短語用）
       if (wrong.length <= 2) {
         return m.replace(wrong, right);
