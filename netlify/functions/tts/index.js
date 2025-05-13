@@ -188,6 +188,17 @@ function addProsody(text) {
 }
 
 /**
+ * 金額表記のカンマを前処理する（サンビャクミススラッシュ問題の対策）
+ * @param {string} text - 変換対象のテキスト
+ * @return {string} - カンマが除去されたテキスト
+ */
+function preProcessCommas(text) {
+  // 数値のカンマを除去する（例: 5,000円 → 5000円）
+  // 「サンビャクミススラッシュ」と読まれる問題を回避
+  return text.replace(/(\d{1,3}),(\d{3})([円万千\s]|$)/g, '$1$2$3');
+}
+
+/**
  * 数値の読み上げ最適化
  * @param {string} text - 変換対象のテキスト
  * @return {string} - 数値読み上げが最適化されたテキスト
@@ -201,11 +212,7 @@ function optimizeNumbers(text) {
     // 時刻の読み上げ最適化
     .replace(/(\d{1,2})時(\d{1,2})分/g, '<say-as interpret-as="time" format="hm">$1:$2</say-as>')
     // パーセントの読み上げ最適化
-    .replace(/(\d+)%/g, '$1<say-as interpret-as="characters">%</say-as>')
-    // 金額の読み上げ最適化 - より多くのパターンに対応
-    .replace(/(\d{1,3}(,\d{3})*|\d+)(円|万円)/g, '<say-as interpret-as="cardinal">$1</say-as>$3')
-    // 一般的な数値の読み上げ最適化
-    .replace(/(\d+)([^\d\s%円年月日時分秒])/g, '<say-as interpret-as="cardinal">$1</say-as>$2');
+    .replace(/(\d+)%/g, '$1<say-as interpret-as="characters">%</say-as>');
 }
 
 /**
@@ -214,32 +221,31 @@ function optimizeNumbers(text) {
  * @return {string} - SSML形式の完全なマークアップ
  */
 function textToSSML(text) {
-  // テキスト前処理
-  // 1. マークダウンをプレーンテキストに変換
-  let ssml = cleanMarkdown(text);
+  // 1. カンマ区切りの数値を前処理（サンビャクミススラッシュ問題対策）
+  let ssml = preProcessCommas(text);
   
-  // 2. URLや電話番号を最適化
+  // 2. マークダウンをプレーンテキストに変換
+  ssml = cleanMarkdown(ssml);
+  
+  // 3. URLや電話番号を最適化
   ssml = optimizeUrlsForSpeech(ssml);
   ssml = formatPhoneNumbers(ssml);
   
-  // 3. 重要: 「えんちょう」を常に「園長」として解釈、「えんちょうほいく」は「延長保育」として解釈
+  // 4. 重要: 「えんちょう」を常に「園長」として解釈、「えんちょうほいく」は「延長保育」として解釈
   ssml = ssml
     .replace(/えんちょうほいく/g, '延長保育') // 先に「えんちょうほいく」を処理
     .replace(/えんちょう/g, '園長');  // 残りの「えんちょう」は全て「園長」
   
-  // 4. 日本語の読みを最適化（特に幼稚園用語）
+  // 5. 日本語の読みを最適化（特に幼稚園用語）
   ssml = optimizeJapaneseReading(ssml);
   
-  // 5. 文脈処理後の追加補正
+  // 6. 文脈処理後の追加補正
   // SSMLタグ付け前の最終チェック
   ssml = ssml
     .replace(/えんじかず/g, 'えんじすう') // 「園児数」の読み間違い対策
     .replace(/ふくえんまち/g, 'ふくえんちょう') // 副園長の誤読対策
     .replace(/そえんちょう/g, 'ふくえんちょう') // 副園長の別の誤読対策
     .replace(/がんしょう/g, 'がんしょ'); // 願書の読み間違い対策
-
-  // 6. 金額情報の特別処理 - 入園料や保育料など
-  ssml = handleFinancialInfo(ssml);
   
   // 7. ポーズと抑揚を追加
   ssml = addProsody(ssml);
@@ -249,44 +255,6 @@ function textToSSML(text) {
   
   // 最終的なSSML形式に整形
   return `<speak>${ssml}</speak>`;
-}
-
-/**
- * 金額情報の特別処理
- * 入園料や保育料などの金額情報を適切に処理する
- * @param {string} text - 変換対象のテキスト
- * @return {string} - 金額情報が最適化されたテキスト
- */
-function handleFinancialInfo(text) {
-  // 金額表現を正確に読み上げるための処理
-  let processed = text;
-  
-  // 入園料や保育料などの金額表現を検出して適切に処理
-  const amountPatterns = [
-    // 入園料パターン
-    /入園料は(\d{1,3}(,\d{3})*|\d+)円/g,
-    // 保育料パターン
-    /保育料は(\d{1,3}(,\d{3})*|\d+)円/g,
-    // 月額料金パターン
-    /月額(\d{1,3}(,\d{3})*|\d+)円/g,
-    // 費用パターン
-    /費用は(\d{1,3}(,\d{3})*|\d+)円/g
-  ];
-  
-  // 各パターンに対応
-  for (const pattern of amountPatterns) {
-    processed = processed.replace(pattern, (match, amount) => {
-      // 金額を強調して読み上げる
-      return match.replace(amount, `<emphasis level="moderate">${amount}</emphasis>`);
-    });
-  }
-  
-  // 内訳の金額表現も適切に処理
-  processed = processed.replace(/(\d{1,3}(,\d{3})*|\d+)円/g, (match, amount) => {
-    return match.replace(amount, `<say-as interpret-as="cardinal">${amount}</say-as>`);
-  });
-  
-  return processed;
 }
 
 /**
