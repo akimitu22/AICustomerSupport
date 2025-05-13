@@ -160,56 +160,68 @@ function stripSpeakerLabel(text) {
   );
 }
 
+/* ───────── ユーティリティ関数 ───────── */
+// メタ文字をエスケープする関数
+const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// 日本語文字（漢字・ひらがな・カタカナ）を表す正規表現
+const WORD = '[\\p{Script=Hani}\\p{Script=Hira}\\p{Script=Kana}]';
+
 /* ───────── 誤変換補正関数 ───────── */
 function correctKindergartenTerms(text) {
-  let corrected = text;
+  let out = text;
 
   /* 前処理 - えんちょうの単体処理を確実にするための特別ルール */
   // 先に「えんちょうほいく」「えんちょう保育」を一時的なマーカーに置換
-  corrected = corrected
+  out = out
     .replace(/えんちょうほいく/g, '##ENCHOHOKU##')
     .replace(/えんちょう保育/g, '##ENCHOHOIKU##');
   
   // 単体の「えんちょう」は必ず「園長」に変換（単語境界考慮）
-  corrected = corrected.replace(/えんちょう/g, '園長');
+  out = out.replace(/\bえんちょう\b/gu, '園長');
   
   // マーカーを「延長保育」に戻す
-  corrected = corrected
+  out = out
     .replace(/##ENCHOHOKU##/g, '延長保育')
     .replace(/##ENCHOHOIKU##/g, '延長保育');
 
-  /* 基本辞書置換 - オブジェクトのキーの長さで降順ソートして適用（より長いパターンを優先） */
+  /* 基本辞書置換 - 優先度→長さの降順でソート */
   const sortedEntries = Object.entries(speechCorrectionDict)
     .sort((a, b) => b[0].length - a[0].length);
     
   for (const [wrong, right] of sortedEntries) {
-    // 単語境界を考慮した置換（部分一致を避ける）
-    // 注: 日本語では\bが期待通りに機能しないため、より詳細な条件を設定
-    if (wrong.length <= 2) {
-      // 短い単語の場合、完全一致または単語の境界を考慮
-      corrected = corrected.replace(new RegExp(`(^|[^ぁ-んァ-ン一-龯])${wrong}($|[^ぁ-んァ-ン一-龯])`, 'g'), `$1${right}$2`);
-    } else {
-      // 長い単語の場合は標準的な置換
-      corrected = corrected.replace(new RegExp(wrong, 'g'), right);
-    }
+    // 単語の長さによって置換パターンを変える
+    const pattern = wrong.length <= 2
+      // 前後が日本語文字でないことを保証（短語用）
+      ? new RegExp(`(?:^|[^${WORD}])${esc(wrong)}(?=$|[^${WORD}])`, 'gu')
+      // 普通の単語はエスケープして置換
+      : new RegExp(esc(wrong), 'gu');
+
+    // 置換処理
+    out = out.replace(pattern, m => {
+      // 先頭を保持して置換（短語用）
+      if (wrong.length <= 2) {
+        return m.replace(wrong, right);
+      }
+      return right;
+    });
   }
 
   /* 園児数に関する特別な処理 - 万が一辞書で対応できなかったパターン向け */
-  corrected = corrected
+  out = out
     .replace(/えん(?:じ|字|時)(?:すう|数)/g, '園児数')
     .replace(/延(?:じ|字|児)(?:すう|数)/g, '園児数')
     .replace(/園(?:字|時)(?:すう|数)/g, '園児数')
     .replace(/縁児(?:すう|数)/g, '園児数');
 
   /* 「円」と「園」の誤変換対応 - 数字の後の円はそのままに */
-  corrected = corrected
+  out = out
     .replace(/(\d+)([万千百十]?)円/g, '$1$2円')  // 数字＋円はそのまま
     .replace(/([^\d０-９万千百十])円/g, '$1園')  // それ以外＋円→園
     .replace(/円児/g, '園児')                   // 円児→園児
     .replace(/円長/g, '園長');                  // 円長→園長
 
   /* 文脈に応じた補正 */
-  corrected = corrected
+  out = out
     .replace(/しますから\?/g, 'しますか?')            // 質問の誤認識修正
     .replace(/(\S+)(幼稚園|保育園)/g, (match, p1, p2) => {  // 幼稚園名の修正
       // ホザナ以外の単語が幼稚園に付く場合はホザナ幼稚園に統一
@@ -220,11 +232,11 @@ function correctKindergartenTerms(text) {
     });
 
   /* 文末処理 - "です"や"ます"の後に不自然なスペースや記号がある場合に修正 */
-  corrected = corrected
+  out = out
     .replace(/(です|ます)(\s+)([\.。])/g, '$1$3')  // 不自然なスペースを削除
     .replace(/(です|ます)([,\.。、])\s+/g, '$1$2 ') // 句読点後のスペースを整理
 
-  return corrected;
+  return out;
 }
 
 /* ───────── Whisper API 呼び出し ───────── */
