@@ -1,157 +1,172 @@
 // netlify/functions/tts/index.js
-import axios from 'axios';
-import * as fs from 'fs';
-import * as path from 'path';
-import { promisify } from 'util';
+import fetch from 'node-fetch';
 
-// 音声API認証情報
-const TTS_API_KEY = process.env.GOOGLE_API_KEY;
-const VOICE_NAME = 'ja-JP-Standard-B'; // 女性声
-const SPEAKING_RATE = 1.15; 
+// JSONファイルを動的にインポート
+import kindergartenQAData from './QandA.json' assert { type: 'json' };
+const kindergartenQA = kindergartenQAData.kindergartenQA;
 
-// 音声生成関数
-async function generateSpeech(text) {
-  // SSMLに変換して自然な発音を実現
-  const ssml = convertToSSML(text);
-  console.log('変換後SSML:', ssml);
+// 追加するプロンプト情報（実装と連携）
+const TTS_PROMPT = {
+  instructions: `
+    テキスト読み上げに関する指示:
+    - 園の名前は「ホザナようちえん」と読む
+    - 電話番号は読み上げない
+    - 「副園長」は必ず「ふくえんちょう」と読み、「ふくえんまち」とは読まない
+    - 「園児数」は必ず「えんじすう」と読み、決して「えんじかず」と読まない
+    - 「総園児数」は必ず「そうえんじすう」と読む
+  `
+};
 
-  try {
-    const response = await axios.post(
-      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${TTS_API_KEY}`,
-      {
-        input: { ssml },
-        voice: { languageCode: 'ja-JP', name: VOICE_NAME },
-        audioConfig: {
-          audioEncoding: 'MP3',
-          speakingRate: SPEAKING_RATE,
-          pitch: 0,
-          volumeGainDb: 0.5
-        }
-      }
-    );
-    return response.data.audioContent;
-  } catch (error) {
-    console.error('音声生成APIエラー:', error);
-    throw new Error(`音声合成に失敗しました: ${error.message}`);
-  }
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+
+// 日本語の読み最適化（TTS_PROMPTに基づく実装）
+function optimizeJapaneseReading(text) {
+  // プロンプトの指示を実装
+  return text
+    .replace(/副園長/g, 'ふくえんちょう')
+    .replace(/入園/g, 'にゅうえん')
+    .replace(/登園/g, 'とうえん')
+    .replace(/降園/g, 'こうえん')
+    .replace(/通園/g, 'つうえん')
+    .replace(/他園/g, 'たえん')
+    .replace(/卒園/g, 'そつえん')
+    .replace(/卒園児/g, 'そつえんじ')
+    .replace(/園児数/g, 'えんじすう')     
+    .replace(/総園児数/g, 'そうえんじすう') 
+    .replace(/園児/g, 'えんじ')
+    .replace(/園/g, 'えん');
 }
 
-// テキストをSSMLに変換する関数（自然な発音のための最適化）
-function convertToSSML(text) {
-  // 基本的なクリーニング
-  let ssml = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+// マークダウンをシンプルテキストに変換
+function cleanMarkdown(text) {
+  return text
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1');
+}
 
-  // 特殊な読み置換（幼稚園関連）
-  ssml = ssml
-    // 「えんちょうほいく」→「延長保育」の変換は維持（必須）
-    .replace(/えんちょうほいく/g, '延長保育')
-    // 「えんちょう」→「園長」への変換は削除（過剰補正防止）
-    // TTSエンジンが「園長」を適切に読み上げるため
+// URLを読みやすくする
+function optimizeUrlsForSpeech(text) {
+  return text
+    .replace(/https?:\/\/[^\s]+/g, 'ホームページのリンク');
+}
 
-    // その他の幼稚園用語は必要に応じて残す
-    .replace(/がんしょ/g, '願書')
-    .replace(/がんしょう/g, '願書')
-    .replace(/ふくえんちょう/g, '副園長')
-    .replace(/ようちえん/g, '幼稚園')
-    .replace(/こどものいえ/g, '子どもの家')
-    .replace(/にゅうえん/g, '入園')
-    .replace(/そつえん/g, '卒園')
-    .replace(/もんてっそーり/g, 'モンテッソーリ');
+// 電話番号をSSML形式に変換（プロンプト指示: 電話番号は読み上げない）
+function formatPhoneNumbers(text) {
+  // 電話番号を検出して無音に置き換え
+  return text.replace(
+    /(\d{2,4})[-\s]?(\d{2,4})[-\s]?(\d{2,4})/g, 
+    '<break time="300ms"/>' // プロンプト指示に基づき無音に置き換え
+  );
+}
 
-  // 区切り要素でポーズを入れる（読点のポーズは削除して自然さ向上）
-  ssml = ssml
-    // 句読点（読点は除外）
-    .replace(/([。！？])\s*/g, '$1<break time="300ms"/>')
-    
-    // 改行
-    .replace(/\n+/g, '<break time="500ms"/>')
-    
-    // 括弧（prosodyタグは削除し、シンプルなbreakに）
-    .replace(/（/g, '<break time="200ms"/>（')
-    .replace(/）/g, '）<break time="200ms"/>');
+// ポーズと抑揚を追加
+function addProsody(text) {
+  return text
+    .replace(/([。、．，！？])\s*/g, '$1<break time="300ms"/>')
+    .replace(/\n+/g, '<break time="500ms"/>');
+}
 
-  // 日付と時間の読み方修正
-  ssml = ssml
-    .replace(/(\d+)月(\d+)日/g, '$1げつ$2にち')
-    .replace(/(\d+):(\d+)/g, '$1じ$2ふん');
+// テキストをSSMLに変換（統合関数）
+function textToSSML(text) {
+  // プロンプト指示に従った変換処理を実行
+  let ssml = optimizeJapaneseReading(text);
+  ssml = cleanMarkdown(ssml);
+  ssml = optimizeUrlsForSpeech(ssml);
+  ssml = formatPhoneNumbers(ssml);
+  ssml = addProsody(ssml);
   
-  // 英語表現は区切りをつけて明瞭に
-  ssml = ssml.replace(/([a-zA-Z]+)/g, '<break time="100ms"/>$1<break time="100ms"/>');
-
-  // 最終的なSSML形式に整形
+  // 数字の読み上げ最適化（プロンプト指示: 数字は適切に読み上げる）
+  // SSMLの特性で、基本的な数字の読み上げはGoogle TTSが自動対応
+  
   return `<speak>${ssml}</speak>`;
 }
 
-// Netlify Functions ハンドラ
 export const handler = async (event) => {
-  // CORS対応
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS'
-  };
-
-  // プリフライトリクエスト対応
+  // ─ OPTIONS
   if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers, body: '' };
-  }
-
-  // POSTメソッド以外は拒否
-  if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      headers,
-      body: JSON.stringify({ error: 'Method Not Allowed' })
-    };
+    return { statusCode: 200, headers: CORS, body: '' };
   }
 
   try {
-    // リクエストボディを解析
-    const requestBody = JSON.parse(event.body);
-    const { text } = requestBody;
+    const requestData = JSON.parse(event.body || '{}');
+    const { text = '', ssml = '' } = requestData;
+    
+    if (!text.trim() && !ssml.trim()) {
+      throw new Error('text is empty');
+    }
 
-    if (!text) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: '変換するテキストが指定されていません' })
+    const key = process.env.GOOGLE_API_KEY;
+    if (!key) throw new Error('GOOGLE_API_KEY not set');
+
+    /* ── Google TTS ── */
+    let requestBody;
+    
+    if (ssml && ssml.trim()) {
+      // SSMLが提供されている場合はそれを使用
+      requestBody = {
+        input: { ssml: ssml.includes('<speak>') ? ssml : `<speak>${ssml}</speak>` },
+        voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
+        audioConfig: { 
+          audioEncoding: 'MP3',
+          speakingRate: 1.15,
+          pitch: 0.0,
+          volumeGainDb: 0.0
+        },
+      };
+    } else {
+      // 通常のテキスト入力の前処理（プロンプト指示に基づく）
+      const processedSSML = textToSSML(text);
+      
+      requestBody = {
+        input: { ssml: processedSSML },
+        voice: { languageCode: 'ja-JP', ssmlGender: 'NEUTRAL' },
+        audioConfig: { 
+          audioEncoding: 'MP3',
+          speakingRate: 1.15,
+          pitch: 0.0,
+          volumeGainDb: 0.0
+        },
       };
     }
 
-    // 音声生成実行
-    console.log(`TTS開始: ${text.substring(0, 50)}...`);
-    const audioContent = await generateSpeech(text);
+    // モデル選択を試行
+    try {
+      requestBody.voice.name = 'ja-JP-Standard-B';
+    } catch (e) {
+      console.log('Voice model specification failed, using default voice');
+    }
 
-    // 成功レスポンス
+    const resp = await fetch(
+      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      }
+    ).then(r => r.json());
+
+    if (!resp.audioContent) throw new Error(resp.error?.message || 'no audio');
+
+    /* ─ data:URL にラップ ─ */
+    const audioUrl = `data:audio/mpeg;base64,${resp.audioContent}`;
+
     return {
       statusCode: 200,
-      headers: {
-        ...headers,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        success: true,
-        audio: audioContent,
-        timestamp: Date.now()
-      })
+      headers: { ...CORS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audioUrl }),
     };
-
-  } catch (error) {
-    console.error('TTS処理エラー:', error);
-    
-    // エラーレスポンス
+  } catch (err) {
+    console.error('TTS error:', err);
     return {
       statusCode: 500,
-      headers,
-      body: JSON.stringify({
-        success: false,
-        error: `音声合成に失敗しました: ${error.message}`
-      })
+      headers: CORS,
+      body: JSON.stringify({ error: 'TTS failed', detail: err.message }),
     };
   }
 };
