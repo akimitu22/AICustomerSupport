@@ -15,9 +15,12 @@ const TTS_PROMPT = {
     
     ## 発音の統一ルール
     - 「ホザナ幼稚園」は「ホザナようちえん」と読む
+    - 「えんちょう」単体は必ず「園長」として解釈する
+    - 「えんちょうほいく」は「延長保育」として解釈する
     - 「副園長」は「ふくえんちょう」と読み、「ふくえんまち」「そえんちょう」とは絶対に読まない
     - 「園児数」は「えんじすう」と読み、「えんじかず」と絶対に読まない
     - 「総園児数」は「そうえんじすう」と読む
+    - 「願書」は「がんしょ」と読み、「がんしょう」とは読まない
     
     ## 禁止事項
     - 電話番号は読み上げない（無音に置き換える）
@@ -31,7 +34,6 @@ const TTS_PROMPT = {
     - 「卒園」→「そつえん」
     - 「保育」→「ほいく」
     - 「延長保育」→「えんちょうほいく」
-    - 「願書」→「がんしょ」
   `
 };
 
@@ -67,7 +69,7 @@ function optimizeJapaneseReading(text) {
       { pattern: /副園長先生/g, reading: 'ふくえんちょうせんせい' },
       { pattern: /副園長/g, reading: 'ふくえんちょう' },
       { pattern: /園長先生/g, reading: 'えんちょうせんせい' },
-      { pattern: /(^|[^延])園長/g, reading: '$1えんちょう' }, // 「延長」の一部にならないよう先頭か非「延」文字後の「園長」のみ変換
+      { pattern: /園長/g, reading: 'えんちょう' }, // 単体の「えんちょう」は「園長」
       { pattern: /先生/g, reading: 'せんせい' },
     ],
     
@@ -106,8 +108,8 @@ function optimizeJapaneseReading(text) {
     }
   }
   
-  // 文脈依存の特別ケース処理（「延長」か「園長」かの判断）
-  // 「えんちょうほいく」はすでに置換済みなので、残りの「延長」を処理
+  // 文脈依存の特別ケース処理（「延長」）
+  // すでに「えんちょうほいく」は置換済みなので、残りの「延長」を処理
   result = result.replace(/延長/g, 'えんちょう');
   
   return result;
@@ -186,48 +188,6 @@ function addProsody(text) {
 }
 
 /**
- * テキストをSSMLに変換（統合関数）
- * @param {string} text - 変換対象の生テキスト
- * @return {string} - SSML形式の完全なマークアップ
- */
-function textToSSML(text) {
-  // テキスト前処理
-  // 1. マークダウンをプレーンテキストに変換
-  let ssml = cleanMarkdown(text);
-  
-  // 2. URLや電話番号を最適化
-  ssml = optimizeUrlsForSpeech(ssml);
-  ssml = formatPhoneNumbers(ssml);
-  
-  // 3. 「えんちょう」の文脈依存処理
-  // 「えんちょうほいく」または「えんちょう保育」は「延長保育」
-  // それ以外の「えんちょう」は「園長」と解釈
-  ssml = ssml
-    .replace(/えんちょう(ほいく|保育)/g, '延長保育')
-    .replace(/えんちょう/g, '園長');
-  
-  // 4. 日本語の読みを最適化（特に幼稚園用語）
-  ssml = optimizeJapaneseReading(ssml);
-  
-  // 5. 文脈処理後の追加補正
-  // SSMLタグ付け前の最終チェック
-  // 「えんじすう」「えんじかず」の明示的なチェック
-  ssml = ssml
-    .replace(/えんじかず/g, 'えんじすう') // 万一残っていた場合に修正
-    .replace(/ふくえんまち/g, 'ふくえんちょう') // 副園長の誤読対策
-    .replace(/そえんちょう/g, 'ふくえんちょう'); // 副園長の別の誤読対策
-  
-  // 6. ポーズと抑揚を追加
-  ssml = addProsody(ssml);
-  
-  // 7. 数値の読み上げ最適化
-  ssml = optimizeNumbers(ssml);
-  
-  // 最終的なSSML形式に整形
-  return `<speak>${ssml}</speak>`;
-}
-
-/**
  * 数値の読み上げ最適化
  * @param {string} text - 変換対象のテキスト
  * @return {string} - 数値読み上げが最適化されたテキスト
@@ -244,6 +204,46 @@ function optimizeNumbers(text) {
     .replace(/(\d+)%/g, '$1<say-as interpret-as="characters">%</say-as>')
     // 金額の読み上げ最適化
     .replace(/(\d+)円/g, '<say-as interpret-as="cardinal">$1</say-as>円');
+}
+
+/**
+ * テキストをSSMLに変換（統合関数）
+ * @param {string} text - 変換対象の生テキスト
+ * @return {string} - SSML形式の完全なマークアップ
+ */
+function textToSSML(text) {
+  // テキスト前処理
+  // 1. マークダウンをプレーンテキストに変換
+  let ssml = cleanMarkdown(text);
+  
+  // 2. URLや電話番号を最適化
+  ssml = optimizeUrlsForSpeech(ssml);
+  ssml = formatPhoneNumbers(ssml);
+  
+  // 3. 重要: 「えんちょう」を常に「園長」として解釈、「えんちょうほいく」は「延長保育」として解釈
+  ssml = ssml
+    .replace(/えんちょうほいく/g, '延長保育') // 先に「えんちょうほいく」を処理
+    .replace(/えんちょう/g, '園長');  // 残りの「えんちょう」は全て「園長」
+  
+  // 4. 日本語の読みを最適化（特に幼稚園用語）
+  ssml = optimizeJapaneseReading(ssml);
+  
+  // 5. 文脈処理後の追加補正
+  // SSMLタグ付け前の最終チェック
+  ssml = ssml
+    .replace(/えんじかず/g, 'えんじすう') // 「園児数」の読み間違い対策
+    .replace(/ふくえんまち/g, 'ふくえんちょう') // 副園長の誤読対策
+    .replace(/そえんちょう/g, 'ふくえんちょう') // 副園長の別の誤読対策
+    .replace(/がんしょう/g, 'がんしょ'); // 願書の読み間違い対策
+
+  // 6. ポーズと抑揚を追加
+  ssml = addProsody(ssml);
+  
+  // 7. 数値の読み上げ最適化
+  ssml = optimizeNumbers(ssml);
+  
+  // 最終的なSSML形式に整形
+  return `<speak>${ssml}</speak>`;
 }
 
 /**
