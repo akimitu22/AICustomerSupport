@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2020", "DOM"],
+    "types": ["node"],
+    "outDir": "dist-node",
+    "skipLibCheck": true,
+    "allowJs": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*", "src/node-test/**/*"],
+  "ts-node": {
+    "transpileOnly": true
+  }
+}

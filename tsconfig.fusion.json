@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "isolatedModules": false,
+    "skipLibCheck": true,
+    "noEmitOnError": false,
+    "allowJs": true,
+    "checkJs": false,
+    "noImplicitAny": false,
+    "sourceMap": true,
+    "outDir": "public/js",
+    "incremental": false
+  },
+  "include": ["src/core/fusionCore/*.ts"]
+}
