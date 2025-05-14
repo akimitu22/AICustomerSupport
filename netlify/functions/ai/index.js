@@ -55,9 +55,13 @@ export const handler = async function(event, context) {
     const { message, sessionId } = requestBody;
     let originalText = message?.trim() || '';
     
-    // ★★ STT 誤変換辞書を手入力にも適用 ★★
+    // STT 誤変換辞書を手入力にも適用
     for (const [k, v] of Object.entries(speechCorrectionDict)) {
       originalText = originalText.replaceAll(k, v);
+    }
+    
+    if (originalText.includes('延長') && personHintRe.test(originalText)) {
+      originalText = originalText.replaceAll('延長', '園長');
     }
     
     if (!originalText) {
