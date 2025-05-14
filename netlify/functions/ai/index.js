@@ -60,8 +60,6 @@ export const handler = async function(event, context) {
       originalText = originalText.replaceAll(k, v);
     }
     
-    // 元の処理に戻す - 人物についての質問の場合は「延長」を「園長」に変換
-    // 「延長保育」は辞書の中で既に保護されているので、そのまま残る
     if (originalText.includes('延長') && personHintRe.test(originalText)) {
       originalText = originalText.replaceAll('延長', '園長');
     }
@@ -170,10 +168,7 @@ ${qaContext}
           max_tokens: 400,
           temperature: 0.5
         },
-        { 
-          headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-          timeout: 30000 // 30秒タイムアウト
-        }
+        { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
       );
 
       const reply = data.choices?.[0]?.message?.content || '申し訳ありません、回答を生成できませんでした。';
@@ -187,52 +182,34 @@ ${qaContext}
         body: JSON.stringify({ 
           reply, 
           sessionId: sid, 
-          stage: 'initial', // ステージ管理はシンプル化
-          hasReply: true
+          stage: 'initial' // ステージ管理はシンプル化
         })
       };
     } catch (apiError) {
       console.error('OpenAI API error:', apiError.response?.data || apiError.message);
-      
-      // エラー種別に応じたユーザーフレンドリーなメッセージ
-      let fallbackMessage = "申し訳ありませんが、AIとの通信中にエラーが発生しました。もう一度お試しください。";
-      
-      if (apiError.message.includes('socket hang up') || apiError.message.includes('timeout')) {
-        fallbackMessage = "申し訳ありませんが、応答生成に時間がかかりすぎています。もう一度質問を簡潔にお願いします。";
-      }
-      
-      // クライアント側の処理を継続できるよう200ステータスで返す
       return {
-        statusCode: 200,
+        statusCode: 502,
         headers: {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*"
         },
         body: JSON.stringify({ 
-          reply: fallbackMessage,
-          sessionId: sid,
-          stage: 'initial',
-          hasReply: true,
-          isErrorFallback: true
+          error: 'OpenAI API エラー', 
+          details: apiError.response?.data?.error?.message || apiError.message 
         })
       };
     }
   } catch (e) {
     console.error('AI処理エラー:', e);
-    
-    // 予期しないエラーでもユーザー体験を維持
     return {
-      statusCode: 200, // クライアント側での処理継続のため
+      statusCode: 500,
       headers: {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*"
       },
-      body: JSON.stringify({
-        reply: "申し訳ありませんが、内部処理中にエラーが発生しました。別の質問をお試しいただくか、少し時間をおいてからもう一度お願いします。",
-        sessionId: requestBody?.sessionId || `s_${Date.now()}`,
-        stage: 'initial',
-        hasReply: true,
-        isErrorFallback: true
+      body: JSON.stringify({ 
+        error: 'AI応答生成失敗', 
+        details: e.message 
       })
     };
   }
