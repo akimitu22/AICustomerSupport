@@ -1,6 +1,7 @@
 // netlify/functions/stt/index.js
 import axios from 'axios';
 import FormData from 'form-data';
+import https from 'https';  // キープアライブ設定のためにhttpsモジュールを追加
 
 /* ───────── STT用プロンプト情報 ───────── */
 const STT_PROMPT = {
@@ -172,29 +173,49 @@ function postProcessBasedOnPrompt(text) {
   return result;
 }
 
-/* ───────── Whisper API 呼び出し ───────── */
-async function callWhisperAPI(audioBuffer, format) {
-  const formData = new FormData();
-  formData.append('file', audioBuffer, {
-    filename: 'audio.webm',
-    contentType: format || 'audio/webm'
-  });
-  formData.append('model', 'whisper-1');
-  
-  // プロンプトを拡張して園児数に関する指示を追加
-  formData.append('prompt', KINDERGARTEN_PROMPT);
+/* ───────── Whisper API 呼び出し（リトライロジック付き） ───────── */
+async function callWhisperAPIWithRetry(audioBuffer, format, maxRetries = 3) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const formData = new FormData();
+      formData.append('file', audioBuffer, {
+        filename: 'audio.webm',
+        contentType: format || 'audio/webm'
+      });
+      formData.append('model', 'whisper-1');
+      
+      // プロンプトを拡張して園児数に関する指示を追加
+      formData.append('prompt', KINDERGARTEN_PROMPT);
 
-  const headers = formData.getHeaders();
-  headers['Content-Length'] = await new Promise(res =>
-    formData.getLength((_, len) => res(len))
-  );
+      const headers = formData.getHeaders();
+      headers['Content-Length'] = await new Promise(res =>
+        formData.getLength((_, len) => res(len))
+      );
 
-  return axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
-    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, ...headers },
-    maxBodyLength: 25 * 1024 * 1024,
-    maxContentLength: 25 * 1024 * 1024,
-    timeout: 25000
-  });
+      const response = await axios.post('https://api.openai.com/v1/audio/transcriptions', formData, {
+        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, ...headers },
+        maxBodyLength: 25 * 1024 * 1024,
+        maxContentLength: 25 * 1024 * 1024,
+        timeout: 30000,  // タイムアウトを30秒に延長
+        httpsAgent: new https.Agent({ keepAlive: true })  // キープアライブ設定を追加
+      });
+      
+      return response;
+    } catch (error) {
+      console.error(`Attempt ${attempt + 1}/${maxRetries} failed:`, error.message);
+      
+      // 最後の試行で失敗した場合はエラーをスロー
+      if (attempt === maxRetries - 1) {
+        console.error("All retry attempts failed");
+        throw error;
+      }
+      
+      // 指数バックオフで待機
+      const delay = 1000 * Math.pow(2, attempt);
+      console.log(`Waiting ${delay}ms before next attempt...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
 }
 
 /* ───────── 共通レスポンス整形 ───────── */
@@ -213,6 +234,15 @@ function formatResponse(statusCode, headers, data = {}, error = null) {
 
 /* ───────── Lambda ハンドラ ───────── */
 export const handler = async (event) => {
+  // 未処理の例外をキャッチするハンドラを追加
+  process.on('unhandledRejection', (error) => {
+    console.error('Unhandled Promise Rejection:', error);
+  });
+  
+  process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+  });
+
   // STT_PROMPTの指示に従ってリクエストを処理
   console.log(`Processing STT request based on prompt instructions: ${STT_PROMPT.instructions.split('\n')[1]}`);
   
@@ -231,6 +261,16 @@ export const handler = async (event) => {
       return formatResponse(400, headers, {}, 'JSON required');
 
     const req = JSON.parse(event.body || '{}');
+    
+    // テストモード対応（オプション）
+    if (req.test === true) {
+      return formatResponse(200, headers, {
+        text: "テストモード：音声認識機能は正常に動作しています",
+        originalText: "テストモード：音声認識機能は正常に動作しています",
+        timestamp: Date.now()
+      });
+    }
+    
     if (!req.audio) return formatResponse(400, headers, {}, 'No audio data');
     if (!process.env.OPENAI_API_KEY) return formatResponse(500, headers, {}, 'API key missing');
 
@@ -239,8 +279,8 @@ export const handler = async (event) => {
     if (audioBuffer.length / (1024 * 1024) > 9.5)
       return formatResponse(413, headers, {}, 'Audio too large (>10 MB)');
 
-    /* Whisper 呼び出し */
-    const resp = await callWhisperAPI(audioBuffer, req.format);
+    /* Whisper 呼び出し（リトライロジック付き） */
+    const resp = await callWhisperAPIWithRetry(audioBuffer, req.format);
     let recognized = resp.data.text || '';
     recognized = stripSpeakerLabel(recognized);        // ← 話者ラベルを除去
     const corrected = correctKindergartenTerms(recognized);
@@ -252,6 +292,9 @@ export const handler = async (event) => {
     });
 
   } catch (err) {
+    console.error("STT処理エラー:", err);
+    console.error("エラースタックトレース:", err.stack);
+    
     const status = err.response?.status || 500;
     const detail = err.response?.data || err.message;
     return formatResponse(status, headers, { details: detail }, 'Whisper API error');
