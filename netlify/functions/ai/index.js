@@ -5,6 +5,7 @@ import path from 'path';
 
 // JSONファイルから直接QandA情報を読み込み
 import qandaData from './QandA.json' assert { type: 'json' };
+import { speechCorrectionDict } from '../utils/speechMap.js';   
 const kindergartenQA = qandaData.kindergartenQA;
 
 export const handler = async function(event, context) {
@@ -52,7 +53,14 @@ export const handler = async function(event, context) {
     }
     
     const { message, sessionId } = requestBody;
-    if (!message?.trim()) {
+    let originalText = message?.trim() || '';
+    
+    // ★★ STT 誤変換辞書を手入力にも適用 ★★
+    for (const [k, v] of Object.entries(speechCorrectionDict)) {
+      originalText = originalText.replaceAll(k, v);
+    }
+    
+    if (!originalText) {
       return {
         statusCode: 400,
         headers: {
@@ -151,7 +159,7 @@ ${qaContext}
 - 問い合わせには「ホームページのお問い合わせフォームからどうぞ」と案内
 - 不明点は「園へお問い合わせください」と案内`
             },
-            { role: 'user', content: message }
+            { role: 'user', content: originalText }
           ],
           max_tokens: 400,
           temperature: 0.5
