@@ -5,7 +5,7 @@ import path from 'path';
 
 // JSONファイルから直接QandA情報を読み込み
 import qandaData from './QandA.json' assert { type: 'json' };
-import { speechCorrectionDict } from '../utils/speechMap.js';   
+import { speechCorrectionDict, personHintRe } from '../utils/speechMap.js';   
 const kindergartenQA = qandaData.kindergartenQA;
 
 export const handler = async function(event, context) {
@@ -60,8 +60,9 @@ export const handler = async function(event, context) {
       originalText = originalText.replaceAll(k, v);
     }
     
-    if (originalText.includes('延長') && personHintRe.test(originalText)) {
-      originalText = originalText.replaceAll('延長', '園長');
+    /* ---- 園長 ←→ 延長 最終ディスアンビギュエーション ---- */
+    if (/\b延長(?!保育)\b/.test(originalText) && personHintRe.test(originalText)) {
+      originalText = originalText.replace(/\b延長\b/g, '園長');
     }
     
     if (!originalText) {
@@ -168,7 +169,10 @@ ${qaContext}
           max_tokens: 400,
           temperature: 0.5
         },
-        { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }
+        { 
+          headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+          timeout: 30000 // 30秒タイムアウト
+        }
       );
 
       const reply = data.choices?.[0]?.message?.content || '申し訳ありません、回答を生成できませんでした。';
@@ -182,34 +186,52 @@ ${qaContext}
         body: JSON.stringify({ 
           reply, 
           sessionId: sid, 
-          stage: 'initial' // ステージ管理はシンプル化
+          stage: 'initial', // ステージ管理はシンプル化
+          hasReply: true
         })
       };
     } catch (apiError) {
       console.error('OpenAI API error:', apiError.response?.data || apiError.message);
+      
+      // エラー種別に応じたユーザーフレンドリーなメッセージ
+      let fallbackMessage = "申し訳ありませんが、AIとの通信中にエラーが発生しました。もう一度お試しください。";
+      
+      if (apiError.message.includes('socket hang up') || apiError.message.includes('timeout')) {
+        fallbackMessage = "申し訳ありませんが、応答生成に時間がかかりすぎています。もう一度質問を簡潔にお願いします。";
+      }
+      
+      // クライアント側の処理を継続できるよう200ステータスで返す
       return {
-        statusCode: 502,
+        statusCode: 200,
         headers: {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*"
         },
         body: JSON.stringify({ 
-          error: 'OpenAI API エラー', 
-          details: apiError.response?.data?.error?.message || apiError.message 
+          reply: fallbackMessage,
+          sessionId: sid,
+          stage: 'initial',
+          hasReply: true,
+          isErrorFallback: true
         })
       };
     }
   } catch (e) {
     console.error('AI処理エラー:', e);
+    
+    // 予期しないエラーでもユーザー体験を維持
     return {
-      statusCode: 500,
+      statusCode: 200, // クライアント側での処理継続のため
       headers: {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*"
       },
-      body: JSON.stringify({ 
-        error: 'AI応答生成失敗', 
-        details: e.message 
+      body: JSON.stringify({
+        reply: "申し訳ありませんが、内部処理中にエラーが発生しました。別の質問をお試しいただくか、少し時間をおいてからもう一度お願いします。",
+        sessionId: requestBody?.sessionId || `s_${Date.now()}`,
+        stage: 'initial',
+        hasReply: true,
+        isErrorFallback: true
       })
     };
   }
