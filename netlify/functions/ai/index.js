@@ -60,9 +60,10 @@ export const handler = async function(event, context) {
       originalText = originalText.replaceAll(k, v);
     }
     
-    /* ---- 園長 ←→ 延長 最終ディスアンビギュエーション ---- */
-    if (/\b延長(?!保育)\b/.test(originalText) && personHintRe.test(originalText)) {
-      originalText = originalText.replace(/\b延長\b/g, '園長');
+    // 元の処理に戻す - 人物についての質問の場合は「延長」を「園長」に変換
+    // 「延長保育」は辞書の中で既に保護されているので、そのまま残る
+    if (originalText.includes('延長') && personHintRe.test(originalText)) {
+      originalText = originalText.replaceAll('延長', '園長');
     }
     
     if (!originalText) {
