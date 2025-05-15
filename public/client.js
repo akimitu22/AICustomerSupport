@@ -52,6 +52,73 @@ let recordingStartTime = 0;
 let currentSessionId = localStorage.getItem('kindergarten_session_id') || '';
 let conversationStage = 'initial';
 window.currentAudio = null; // グローバル変数
+let userInteractionPromise = null; // ユーザーインタラクション保存用
+
+// ボタンクリックイベントのユーザーインタラクション保存
+document.addEventListener('DOMContentLoaded', function() {
+  // 音声サポートトグルボタンの取得
+  const toggleButton = document.getElementById('voice-support-toggle');
+  
+  if (toggleButton) {
+    // 既存のクリックイベントを保持するためにイベントリスナーを追加
+    toggleButton.addEventListener('click', function() {
+      // ユーザーインタラクションを保存
+      storeUserInteraction();
+    }, { capture: true }); // capture:trueで他のハンドラより先に実行
+  }
+  
+  // クイックリンクのボタンにもユーザーインタラクションを保存
+  if (quickLinksEl) {
+    quickLinksEl.addEventListener('click', function(e) {
+      if (e.target.tagName === 'BUTTON') {
+        storeUserInteraction();
+      }
+    }, { capture: true });
+  }
+});
+
+// ユーザーインタラクションを保存する関数
+function storeUserInteraction() {
+  safeLog('ユーザーインタラクション保存開始', null);
+  
+  // iOS/Safariの場合のみ特別な処理を行う
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  
+  if (isIOS || isSafari) {
+    userInteractionPromise = new Promise(resolve => {
+      // 無音の短いオーディオファイル
+      const silentAudio = new Audio();
+      silentAudio.src = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAXAAAARW5jb2RlZCBieQBMYXZmNTguMTIuMTAwAEFQSUMAAAEABEVuY29kZWQgYnkATGF2ZjU4LjEyLjEwMAAAAAAAAAAAAABJbmZvAAAADwAAAAgAAABCADwAFAAdACUALQA2AD4ARgBPAFcAYABoAHEAeQCBAIoAkgCbAKMArAC0AL0AxgDOANcA3wDoAPEA+QECAQoBEwEbASQBLAE1AT0BRgFOAVcBXwFoAXABeQGBAYoA//////////////////////////////////////////////////////////////////9MVFJEM0A9V0NPQgAAAC8gY3JlYXRlZCBieSBMYXZmNTguMTIuMTAwAABJRDMEAAAAAAE1TEVOVAAAAA8AAABUaXRsZQBTaWxlbmNlAAA=';
+      silentAudio.load();
+      silentAudio.oncanplaythrough = () => {
+        // 音声再生または他の動作
+        silentAudio.play()
+          .then(() => {
+            safeLog('ユーザーインタラクション保存成功', null);
+            resolve(true);
+          })
+          .catch(err => {
+            safeLog('サイレントオーディオ再生エラー', err);
+            // エラーが発生しても続行（正常と見なす）
+            resolve(true);
+          });
+      };
+      
+      // oncanplaythroughが発火しない場合のフォールバック
+      setTimeout(() => {
+        if (!silentAudio.paused) {
+          silentAudio.pause();
+        }
+        resolve(true);
+      }, 1000);
+    });
+  } else {
+    // iOS/Safari以外の場合は単純に解決済みPromiseを設定
+    userInteractionPromise = Promise.resolve(true);
+    safeLog('非iOS環境: ユーザーインタラクション保存なし', null);
+  }
+}
 
 /* ───────── VAD 初期化 ───────── */
 startVAD().catch(err => {
@@ -102,6 +169,9 @@ async function startVAD() {
     statusEl.textContent = '🎧 どうぞお話しください…';
     vadActive = true;
     createQuickLinks();
+    
+    // 初回のユーザーインタラクションを保存
+    storeUserInteraction();
   } catch (err) {
     console.error('マイク初期化エラー:', err);
     throw err;
@@ -120,6 +190,9 @@ function vadMonitor(e) {
       recordingChunks = [];
       recordingStartTime = Date.now();
       mediaRecorder.start();
+      
+      // 発話開始時にユーザーインタラクションを更新
+      storeUserInteraction();
     }
     clearTimeout(silenceTimer);
     silenceTimer = setTimeout(stopRecording, 1500); // 1.5秒に延長
@@ -425,98 +498,168 @@ function playAudio(url) {
         isPlayingAudio = false;
       }
 
-      /* 新しい Audio インスタンス */
-      window.currentAudio = new Audio();
-      let lastPos = 0;
-      let idleCount = 0;
-      const MAX_IDLE = 6; // ← ★ idle 緩和 6-8 回
-      const IDLE_TH = 0.1; // ← ★ Δ < 0.1 s で idle 加算
-      const RESET_TH = 0.5; // ← ★ Δ ≥ 0.5 s で idle リセット
-      let progressTimer = null;
-      let backupTimer = null;
+      // ユーザーインタラクションを利用して音声再生
+      const playWithInteraction = () => {
+        /* 新しい Audio インスタンス */
+        window.currentAudio = new Audio();
+        let lastPos = 0;
+        let idleCount = 0;
+        const MAX_IDLE = 6; // ← ★ idle 緩和 6-8 回
+        const IDLE_TH = 0.1; // ← ★ Δ < 0.1 s で idle 加算
+        const RESET_TH = 0.5; // ← ★ Δ ≥ 0.5 s で idle リセット
+        let progressTimer = null;
+        let backupTimer = null;
 
-      /* 進捗監視 */
-      const startWatch = () => {
-        progressTimer = setInterval(() => {
-          if (!isPlayingAudio) return;
+        /* 進捗監視 */
+        const startWatch = () => {
+          progressTimer = setInterval(() => {
+            if (!isPlayingAudio) return;
 
-          const cur = window.currentAudio.currentTime;
-          const delta = cur - lastPos;
+            const cur = window.currentAudio.currentTime;
+            const delta = cur - lastPos;
 
-          if (delta < IDLE_TH) {
-            idleCount++;
-            if (idleCount >= MAX_IDLE) {
-              safeLog('無音停止検出', { cur, idleCount });
-              cleanup(); // 停止処理
+            if (delta < IDLE_TH) {
+              idleCount++;
+              if (idleCount >= MAX_IDLE) {
+                safeLog('無音停止検出', { cur, idleCount });
+                cleanup(); // 停止処理
+              }
+            } else if (delta >= RESET_TH) {
+              idleCount = 0; // 大きく進んだらカウンタ初期化
             }
-          } else if (delta >= RESET_TH) {
-            idleCount = 0; // 大きく進んだらカウンタ初期化
-          }
-          lastPos = cur;
-        }, 1000);
-      };
+            lastPos = cur;
+          }, 1000);
+        };
 
-      /* 停止共通処理 */
-      const cleanup = () => {
-        try {
-          window.currentAudio.pause();
-        } catch {}
-        clearInterval(progressTimer);
-        clearTimeout(backupTimer);
-        isPlayingAudio = false;
-        resolve();
-      };
+        /* 停止共通処理 */
+        const cleanup = () => {
+          try {
+            window.currentAudio.pause();
+          } catch {}
+          clearInterval(progressTimer);
+          clearTimeout(backupTimer);
+          isPlayingAudio = false;
+          resolve();
+        };
 
-      /* エラー処理 */
-      window.currentAudio.onerror = e => {
-        clearInterval(progressTimer);
-        clearTimeout(backupTimer);
-        isPlayingAudio = false;
-        reject(new Error('音声読み込み失敗'));
-      };
+        /* エラー処理 */
+        window.currentAudio.onerror = e => {
+          clearInterval(progressTimer);
+          clearTimeout(backupTimer);
+          isPlayingAudio = false;
+          reject(new Error('音声読み込み失敗'));
+        };
 
-      /* 再生準備完了 → 動的タイマー確定 */
-      window.currentAudio.oncanplaythrough = () => {
-        safeLog('音声 oncanplaythrough', { duration: window.currentAudio.duration });
+        /* 再生準備完了 → 動的タイマー確定 */
+        window.currentAudio.oncanplaythrough = () => {
+          safeLog('音声 oncanplaythrough', { duration: window.currentAudio.duration });
 
-        /* 動的バックアップ: (音声長 +10 s) ただし最大90 s */
-        const dur =
-          isFinite(window.currentAudio.duration) && window.currentAudio.duration > 0
-            ? Math.min(90, window.currentAudio.duration + 10)
-            : 90;
+          /* 動的バックアップ: (音声長 +10 s) ただし最大90 s */
+          const dur =
+            isFinite(window.currentAudio.duration) && window.currentAudio.duration > 0
+              ? Math.min(90, window.currentAudio.duration + 10)
+              : 90;
 
-        backupTimer = setTimeout(() => {
-          safeLog('バックアップタイマー発火', { dur });
+          backupTimer = setTimeout(() => {
+            safeLog('バックアップタイマー発火', { dur });
+            cleanup();
+          }, dur * 1000);
+
+          /* 再生開始 */
+          isPlayingAudio = true;
+          window.currentAudio
+            .play()
+            .then(() => safeLog('音声再生開始'))
+            .catch(err => {
+              safeLog('音声再生エラー（再試行）', err);
+              
+              // iOS/Safariの場合、再度ユーザーインタラクションを保存してリトライ
+              if (/iPad|iPhone|iPod/.test(navigator.userAgent) || /^((?!chrome|android).)*safari/i.test(navigator.userAgent)) {
+                storeUserInteraction().then(() => {
+                  safeLog('音声再生リトライ', null);
+                  window.currentAudio.play().catch(finalErr => {
+                    safeLog('最終音声再生エラー', finalErr);
+                    clearTimeout(backupTimer);
+                    // 再生失敗時はボタンを表示（フォールバック）
+                    showPlayButton(url);
+                    reject(finalErr);
+                  });
+                });
+              } else {
+                clearTimeout(backupTimer);
+                // 再生失敗時はボタンを表示（フォールバック）
+                showPlayButton(url);
+                reject(err);
+              }
+            });
+
+          startWatch(); // 進捗監視開始
+        };
+
+        /* 再生正常終了 */
+        window.currentAudio.onended = () => {
+          safeLog('音声再生 onended');
           cleanup();
-        }, dur * 1000);
+        };
 
-        /* 再生開始 */
-        isPlayingAudio = true;
-        window.currentAudio
-          .play()
-          .then(() => safeLog('音声再生開始'))
-          .catch(err => {
-            clearTimeout(backupTimer);
-            reject(err);
-          });
-
-        startWatch(); // 進捗監視開始
+        /* URL 設定してロード */
+        window.currentAudio.src = url;
+        window.currentAudio.load();
       };
-
-      /* 再生正常終了 */
-      window.currentAudio.onended = () => {
-        safeLog('音声再生 onended');
-        cleanup();
-      };
-
-      /* URL 設定してロード */
-      window.currentAudio.src = url;
-      window.currentAudio.load();
+      
+      // ユーザーインタラクションがあれば利用、なければ直接再生
+      if (userInteractionPromise) {
+        userInteractionPromise.then(playWithInteraction).catch(() => {
+          // Promise失敗時も通常再生を試行
+          playWithInteraction();
+        });
+      } else {
+        playWithInteraction();
+      }
+      
     } catch (err) {
       isPlayingAudio = false;
       reject(err);
     }
   });
+}
+
+// フォールバック: 再生ボタンを表示
+function showPlayButton(url) {
+  safeLog('再生ボタン表示', null);
+  const playButton = document.createElement('button');
+  playButton.textContent = '🔊 回答を聞く';
+  playButton.className = 'action-btn';
+  playButton.style.backgroundColor = '#4a8ab8';
+  playButton.style.marginTop = '10px';
+  
+  playButton.onclick = () => {
+    // クリック時にオーディオを再生
+    const audio = new Audio(url);
+    audio.play().then(() => {
+      playButton.disabled = true;
+      playButton.textContent = '▶ 再生中...';
+      
+      audio.onended = () => {
+        playButton.remove();
+      };
+    }).catch(err => {
+      safeLog('ボタンからの再生エラー', err);
+      playButton.textContent = '❌ 再生失敗';
+    });
+    
+    // クリックイベントをユーザーインタラクションとして保存
+    storeUserInteraction();
+  };
+  
+  // ボタンを追加
+  if (replyEl) {
+    const existingButton = replyEl.querySelector('.action-btn');
+    if (existingButton) {
+      existingButton.remove();
+    }
+    replyEl.appendChild(playButton);
+  }
 }
 
 /* ───────── クイックリンク & UI ───────── */
@@ -536,6 +679,8 @@ function createQuickLinks() {
     b.onclick = () => {
       recogEl.textContent = `お問合せ内容: ${t}`;
       handleAI(t);
+      // クリックイベントをユーザーインタラクションとして保存
+      storeUserInteraction();
     };
     quickLinksEl.appendChild(b);
   });
