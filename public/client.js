@@ -53,6 +53,49 @@ let currentSessionId = localStorage.getItem('kindergarten_session_id') || '';
 let conversationStage = 'initial';
 window.currentAudio = null; // グローバル変数
 let userInteractionPromise = null; // ユーザーインタラクション保存用
+let audioInteractionCount = 0; // 追加: インタラクションカウンタ
+let audioContext = null; // 追加: グローバルオーディオコンテキスト
+
+// iOS/Safari検出
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+const needsSpecialHandling = isIOS || isSafari;
+
+// 追加: ページ全体のタッチイベントを監視
+if (needsSpecialHandling) {
+  document.addEventListener('touchstart', function() {
+    // タッチごとにインタラクションを更新
+    storeUserInteraction();
+  }, { passive: true });
+  
+  // クリックイベントも監視
+  document.addEventListener('click', function() {
+    storeUserInteraction();
+  }, { passive: true });
+}
+
+// オーディオコンテキストの初期化と解放関数
+function initAudioContext() {
+  if (!audioContext) {
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      safeLog('AudioContext初期化', { state: audioContext.state });
+      
+      // iOS/Safariの場合は状態確認
+      if (needsSpecialHandling && audioContext.state === 'suspended') {
+        safeLog('AudioContext停止中 - 再開試行', null);
+        audioContext.resume().then(() => {
+          safeLog('AudioContext再開成功', { state: audioContext.state });
+        }).catch(err => {
+          safeLog('AudioContext再開失敗', err);
+        });
+      }
+    } catch (e) {
+      safeLog('AudioContext初期化エラー', e);
+    }
+  }
+  return audioContext;
+}
 
 // ボタンクリックイベントのユーザーインタラクション保存
 document.addEventListener('DOMContentLoaded', function() {
@@ -63,7 +106,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // 既存のクリックイベントを保持するためにイベントリスナーを追加
     toggleButton.addEventListener('click', function() {
       // ユーザーインタラクションを保存
-      storeUserInteraction();
+      storeUserInteraction(true); // 重要なインタラクションとしてマーク
     }, { capture: true }); // capture:trueで他のハンドラより先に実行
   }
   
@@ -71,52 +114,101 @@ document.addEventListener('DOMContentLoaded', function() {
   if (quickLinksEl) {
     quickLinksEl.addEventListener('click', function(e) {
       if (e.target.tagName === 'BUTTON') {
-        storeUserInteraction();
+        storeUserInteraction(true);
       }
     }, { capture: true });
   }
+  
+  // AudioContextの初期化
+  initAudioContext();
 });
 
 // ユーザーインタラクションを保存する関数
-function storeUserInteraction() {
-  safeLog('ユーザーインタラクション保存開始', null);
-  
-  // iOS/Safariの場合のみ特別な処理を行う
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-  
-  if (isIOS || isSafari) {
-    userInteractionPromise = new Promise(resolve => {
+function storeUserInteraction(isImportant = false) {
+  try {
+    safeLog('ユーザーインタラクション保存開始', { isImportant, count: audioInteractionCount });
+    audioInteractionCount++; // インタラクションカウンタを増加
+    
+    // AudioContextの解放
+    if (audioContext && audioContext.state === 'suspended') {
+      audioContext.resume().then(() => {
+        safeLog('AudioContext再開成功（インタラクション）', { state: audioContext.state });
+      }).catch(err => {
+        safeLog('AudioContext再開失敗', err);
+      });
+    }
+    
+    // iOS/Safariの場合のみ特別な処理を行う
+    if (needsSpecialHandling || isImportant) {
       // 無音の短いオーディオファイル
       const silentAudio = new Audio();
+      silentAudio.preload = 'auto';
+      silentAudio.volume = 0.1; // 小さな音量に設定
+      silentAudio.muted = false; // ミュートにしない（iOSでは効果なし）
       silentAudio.src = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAXAAAARW5jb2RlZCBieQBMYXZmNTguMTIuMTAwAEFQSUMAAAEABEVuY29kZWQgYnkATGF2ZjU4LjEyLjEwMAAAAAAAAAAAAABJbmZvAAAADwAAAAgAAABCADwAFAAdACUALQA2AD4ARgBPAFcAYABoAHEAeQCBAIoAkgCbAKMArAC0AL0AxgDOANcA3wDoAPEA+QECAQoBEwEbASQBLAE1AT0BRgFOAVcBXwFoAXABeQGBAYoA//////////////////////////////////////////////////////////////////9MVFJEM0A9V0NPQgAAAC8gY3JlYXRlZCBieSBMYXZmNTguMTIuMTAwAABJRDMEAAAAAAE1TEVOVAAAAA8AAABUaXRsZQBTaWxlbmNlAAA=';
-      silentAudio.load();
-      silentAudio.oncanplaythrough = () => {
-        // 音声再生または他の動作
-        silentAudio.play()
-          .then(() => {
-            safeLog('ユーザーインタラクション保存成功', null);
-            resolve(true);
-          })
-          .catch(err => {
+      
+      // 無音ファイルの読み込みが完了したときの処理
+      silentAudio.oncanplaythrough = function() {
+        // ユーザーインタラクションを利用して音声再生
+        const promise = silentAudio.play();
+        
+        if (promise !== undefined) {
+          promise.then(() => {
+            safeLog('サイレントオーディオ再生成功', null);
+            userInteractionPromise = Promise.resolve(true);
+          }).catch(err => {
             safeLog('サイレントオーディオ再生エラー', err);
-            // エラーが発生しても続行（正常と見なす）
-            resolve(true);
+            // エラーでも続行（ユーザー操作がなかった可能性）
+            if (isImportant) {
+              // 重要なインタラクションは有効とする
+              userInteractionPromise = Promise.resolve(true);
+            }
           });
+        } else {
+          // 古いブラウザでの互換性
+          safeLog('古いブラウザ対応: play()はPromiseを返さない', null);
+          userInteractionPromise = Promise.resolve(true);
+        }
       };
       
-      // oncanplaythroughが発火しない場合のフォールバック
-      setTimeout(() => {
-        if (!silentAudio.paused) {
-          silentAudio.pause();
+      // エラー処理
+      silentAudio.onerror = function(e) {
+        safeLog('サイレントオーディオ読み込みエラー', e);
+        // 重要なインタラクションは有効とする
+        if (isImportant) {
+          userInteractionPromise = Promise.resolve(true);
         }
-        resolve(true);
+      };
+      
+      // タイムアウト処理
+      setTimeout(() => {
+        if (!userInteractionPromise) {
+          safeLog('サイレントオーディオタイムアウト', null);
+          if (isImportant) {
+            userInteractionPromise = Promise.resolve(true);
+          }
+        }
       }, 1000);
-    });
-  } else {
-    // iOS/Safari以外の場合は単純に解決済みPromiseを設定
+      
+      // 読み込み開始
+      try {
+        silentAudio.load();
+      } catch (e) {
+        safeLog('サイレントオーディオ読み込み例外', e);
+        // 重要なインタラクションは有効とする
+        if (isImportant) {
+          userInteractionPromise = Promise.resolve(true);
+        }
+      }
+    } else {
+      // iOS/Safari以外の場合は単純に解決済みPromiseを設定
+      userInteractionPromise = Promise.resolve(true);
+      safeLog('非iOS環境: ユーザーインタラクション保存なし', null);
+    }
+  } catch (e) {
+    safeLog('ユーザーインタラクション保存エラー', e);
+    // エラーが発生してもPromiseは有効にする
     userInteractionPromise = Promise.resolve(true);
-    safeLog('非iOS環境: ユーザーインタラクション保存なし', null);
   }
 }
 
@@ -171,7 +263,17 @@ async function startVAD() {
     createQuickLinks();
     
     // 初回のユーザーインタラクションを保存
-    storeUserInteraction();
+    storeUserInteraction(true);
+    
+    // iOSの場合はオーディオコンテキストの状態を確認
+    if (needsSpecialHandling && audioCtx && audioCtx.state === 'suspended') {
+      try {
+        await audioCtx.resume();
+        safeLog('AudioContext初期化時に再開', { state: audioCtx.state });
+      } catch (err) {
+        safeLog('AudioContext初期再開エラー', err);
+      }
+    }
   } catch (err) {
     console.error('マイク初期化エラー:', err);
     throw err;
@@ -192,7 +294,7 @@ function vadMonitor(e) {
       mediaRecorder.start();
       
       // 発話開始時にユーザーインタラクションを更新
-      storeUserInteraction();
+      storeUserInteraction(true);
     }
     clearTimeout(silenceTimer);
     silenceTimer = setTimeout(stopRecording, 1500); // 1.5秒に延長
@@ -351,6 +453,35 @@ async function handleAI(msg) {
       message: msg.substring(0, 50) + (msg.length > 50 ? '...' : ''),
     });
 
+    // 事前にオーディオシステムをウォームアップ (追加)
+    if (needsSpecialHandling) {
+      try {
+        // 新しいAudioContextでウォームアップ
+        const tempContext = new (window.AudioContext || window.webkitAudioContext)();
+        await tempContext.resume();
+        
+        // 音声ファイルの先読み
+        const warmupAudio = new Audio();
+        warmupAudio.preload = 'auto';
+        warmupAudio.src = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAXAAAARW5jb2RlZCBieQBMYXZmNTguMTIuMTAwAEFQSUMAAAEABEVuY29kZWQgYnkATGF2ZjU4LjEyLjEwMAAAAAAAAAAAAABJbmZvAAAADwAAAAgAAABCADwAFAAdACUALQA2AD4ARgBPAFcAYABoAHEAeQCBAIoAkgCbAKMArAC0AL0AxgDOANcA3wDoAPEA+QECAQoBEwEbASQBLAE1AT0BRgFOAVcBXwFoAXABeQGBAYoA//////////////////////////////////////////////////////////////////9MVFJEM0A9V0NPQgAAAC8gY3JlYXRlZCBieSBMYXZmNTguMTIuMTAwAABJRDMEAAAAAAE1TEVOVAAAAA8AAABUaXRsZQBTaWxlbmNlAAA=';
+        warmupAudio.load();
+        
+        safeLog('オーディオシステムウォームアップ完了', null);
+        
+        // クリーンアップ（少し待ってからクローズ）
+        setTimeout(() => {
+          try {
+            tempContext.close();
+          } catch (e) {
+            // エラーは無視
+          }
+        }, 1000);
+      } catch (e) {
+        safeLog('オーディオウォームアップエラー', e);
+        // エラーは無視して続行
+      }
+    }
+
     // AIリクエスト (エラーハンドリング強化)
     let aiResponse;
     try {
@@ -435,11 +566,20 @@ async function handleAI(msg) {
       safeLog('音声URL取得成功', { urlPreview: ttsResponse.audioUrl.substring(0, 50) + '...' });
 
       try {
-        await playAudio(ttsResponse.audioUrl);
-        safeLog('音声再生完了', '再生完了');
+        // iOS/Safariでユーザーインタラクションが不確かな場合は再確認
+        if (needsSpecialHandling && (!userInteractionPromise || audioInteractionCount < 2)) {
+          // 再生ボタンを表示するフォールバック
+          showPlayButton(ttsResponse.audioUrl);
+          safeLog('インタラクション不足のため再生ボタンを表示', { count: audioInteractionCount });
+        } else {
+          // 通常の音声再生
+          await playAudio(ttsResponse.audioUrl);
+          safeLog('音声再生完了', '再生完了');
+        }
       } catch (playError) {
         safeLog('音声再生エラー', playError);
-        // 再生エラーは致命的ではないため、処理を続行
+        // 再生エラーの場合はボタンを表示
+        showPlayButton(ttsResponse.audioUrl);
       }
     } else if (ttsResponse.error) {
       safeLog('TTS エラー', {
@@ -498,8 +638,39 @@ function playAudio(url) {
         isPlayingAudio = false;
       }
 
+      // 再生前にユーザーインタラクションの確認（追加）
+      const ensureInteraction = async () => {
+        if (!userInteractionPromise || (needsSpecialHandling && audioInteractionCount < 2)) {
+          safeLog('再生前にインタラクション再確認', { count: audioInteractionCount });
+          
+          // 自動再生が許可されているか簡易テスト
+          let isAutoplayAllowed = false;
+          try {
+            const testAudio = new Audio();
+            testAudio.volume = 0.01; // ごく小さな音量
+testAudio.src = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAXAAAARW5jb2RlZCBieQBMYXZmNTguMTIuMTAwAEFQSUMAAAEABEVuY29kZWQgYnkATGF2ZjU4LjEyLjEwMAAAAAAAAAAAAABJbmZvAAAADwAAAAgAAABCADwAFAAdACUALQA2AD4ARgBPAFcAYABoAHEAeQCBAIoAkgCbAKMArAC0AL0AxgDOANcA3wDoAPEA+QECAQoBEwEbASQBLAE1AT0BRgFOAVcBXwFoAXABeQGBAYoA//////////////////////////////////////////////////////////////////9MVFJEM0A9V0NPQgAAAC8gY3JlYXRlZCBieSBMYXZmNTguMTIuMTAwAABJRDMEAAAAAAE1TEVOVAAAAA8AAABUaXRsZQBTaWxlbmNlAAA=';
+            await testAudio.play().then(() => {
+              isAutoplayAllowed = true;
+              testAudio.pause();
+            }).catch(() => {
+              isAutoplayAllowed = false;
+            });
+          } catch (e) {
+            isAutoplayAllowed = false;
+          }
+          
+          if (!isAutoplayAllowed) {
+            // インタラクションを保存して再試行
+            await storeUserInteraction(true);
+          }
+        }
+      };
+
       // ユーザーインタラクションを利用して音声再生
-      const playWithInteraction = () => {
+      const playWithInteraction = async () => {
+        // インタラクション確認
+        await ensureInteraction();
+        
         /* 新しい Audio インスタンス */
         window.currentAudio = new Audio();
         let lastPos = 0;
@@ -567,59 +738,102 @@ function playAudio(url) {
 
           /* 再生開始 */
           isPlayingAudio = true;
-          window.currentAudio
-            .play()
-            .then(() => safeLog('音声再生開始'))
-            .catch(err => {
-              safeLog('音声再生エラー（再試行）', err);
-              
-              // iOS/Safariの場合、再度ユーザーインタラクションを保存してリトライ
-              if (/iPad|iPhone|iPod/.test(navigator.userAgent) || /^((?!chrome|android).)*safari/i.test(navigator.userAgent)) {
-                storeUserInteraction().then(() => {
-                  safeLog('音声再生リトライ', null);
-                  window.currentAudio.play().catch(finalErr => {
-                    safeLog('最終音声再生エラー', finalErr);
-                    clearTimeout(backupTimer);
-                    // 再生失敗時はボタンを表示（フォールバック）
-                    showPlayButton(url);
-                    reject(finalErr);
-                  });
-                });
-              } else {
-                clearTimeout(backupTimer);
-                // 再生失敗時はボタンを表示（フォールバック）
-                showPlayButton(url);
-                reject(err);
-              }
+          
+          // iOS/Safariの場合は特別な処理
+          if (needsSpecialHandling) {
+            // AudioContextをウェイクアップ
+            if (audioContext && audioContext.state === 'suspended') {
+              audioContext.resume().catch(() => {});
+            }
+            
+            // iOSの場合、タッチイベントからの時間が経っていると失敗する可能性が高い
+            // 再生ボタンを表示する前に最後の試行として再生を試みる
+            window.currentAudio.play().then(() => {
+              safeLog('iOS音声再生開始成功', null);
+              startWatch(); // 進捗監視開始
+            }).catch(err => {
+              safeLog('iOS音声再生失敗 - フォールバック', err);
+              // フォールバック: 再生ボタンを表示
+              cleanup();
+              showPlayButton(url);
+              reject(new Error('iOS自動再生失敗'));
             });
-
-          startWatch(); // 進捗監視開始
+          } else {
+            // 通常の環境では標準の再生
+            window.currentAudio.play()
+              .then(() => {
+                safeLog('音声再生開始');
+                startWatch(); // 進捗監視開始
+              })
+              .catch(err => {
+                safeLog('音声再生エラー', err);
+                cleanup();
+                
+                // 再生失敗時は2回まで再試行
+                if (!window.playAttempts) window.playAttempts = 0;
+                window.playAttempts++;
+                
+                if (window.playAttempts <= 2) {
+                  safeLog('音声再生リトライ', { attempt: window.playAttempts });
+                  // 少し待ってから再試行
+                  setTimeout(() => {
+                    playAudio(url).then(resolve).catch(() => {
+                      // 最終的な失敗: ボタンを表示
+                      showPlayButton(url);
+                      reject(err);
+                    });
+                  }, 500);
+                } else {
+                  // 再試行回数超過: ボタンを表示
+                  showPlayButton(url);
+                  window.playAttempts = 0;
+                  reject(err);
+                }
+              });
+          }
         };
 
         /* 再生正常終了 */
         window.currentAudio.onended = () => {
           safeLog('音声再生 onended');
           cleanup();
+          // 再試行カウンタリセット
+          window.playAttempts = 0;
         };
 
         /* URL 設定してロード */
+        window.currentAudio.preload = 'auto'; // プリロード設定
         window.currentAudio.src = url;
+        
+        // iOS/Safariの場合はさらに設定を追加
+        if (needsSpecialHandling) {
+          // iOS Safariでの信頼性向上のための追加設定
+          window.currentAudio.autoplay = false; // autoplayは明示的に無効化
+          window.currentAudio.controls = false; // コントロールは表示しない
+          window.currentAudio.crossOrigin = 'anonymous'; // CORS設定
+        }
+        
         window.currentAudio.load();
       };
       
-      // ユーザーインタラクションがあれば利用、なければ直接再生
-      if (userInteractionPromise) {
-        userInteractionPromise.then(playWithInteraction).catch(() => {
-          // Promise失敗時も通常再生を試行
-          playWithInteraction();
-        });
-      } else {
-        playWithInteraction();
-      }
+      // ページ・DOMとの相互作用を確実にするため、少し遅延させる
+      setTimeout(async () => {
+        try {
+          await playWithInteraction();
+        } catch (err) {
+          safeLog('playWithInteraction失敗', err);
+          // 失敗時もrejectしない（showPlayButtonがフォールバックとして表示されるため）
+          resolve();
+        }
+      }, 100);
       
     } catch (err) {
+      safeLog('playAudio全体エラー', err);
       isPlayingAudio = false;
-      reject(err);
+      
+      // エラー時はボタンを表示してresolve
+      showPlayButton(url);
+      resolve(); // rejectではなくresolveで続行（フォールバックあり）
     }
   });
 }
@@ -627,29 +841,92 @@ function playAudio(url) {
 // フォールバック: 再生ボタンを表示
 function showPlayButton(url) {
   safeLog('再生ボタン表示', null);
+  // 既存の再生ボタンを確認
+  const existingButton = document.querySelector('.audio-play-btn');
+  if (existingButton) {
+    safeLog('既存の再生ボタンがあるため新規作成をスキップ', null);
+    return;
+  }
+  
   const playButton = document.createElement('button');
   playButton.textContent = '🔊 回答を聞く';
-  playButton.className = 'action-btn';
+  playButton.className = 'action-btn audio-play-btn';
   playButton.style.backgroundColor = '#4a8ab8';
   playButton.style.marginTop = '10px';
+  playButton.style.padding = '10px 20px';
+  playButton.style.fontSize = '16px';
+  playButton.style.borderRadius = '8px';
+  playButton.style.border = 'none';
+  playButton.style.cursor = 'pointer';
+  playButton.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
+  
+  // タップ操作を最適化
+  if (needsSpecialHandling) {
+    playButton.style.padding = '12px 24px'; // より大きなタップエリア
+  }
   
   playButton.onclick = () => {
     // クリック時にオーディオを再生
+    playButton.disabled = true;
+    playButton.textContent = '▶ 再生中...';
+    playButton.style.backgroundColor = '#999';
+    
+    // インタラクションをリフレッシュ
+    storeUserInteraction(true);
+    
+    // 新しいAudioインスタンス
     const audio = new Audio(url);
-    audio.play().then(() => {
-      playButton.disabled = true;
-      playButton.textContent = '▶ 再生中...';
-      
-      audio.onended = () => {
-        playButton.remove();
-      };
-    }).catch(err => {
-      safeLog('ボタンからの再生エラー', err);
+    audio.volume = 1.0;
+    
+    // 進捗表示用のバー（オプション）
+    const progressBar = document.createElement('div');
+    progressBar.style.width = '100%';
+    progressBar.style.backgroundColor = '#eee';
+    progressBar.style.height = '4px';
+    progressBar.style.marginTop = '5px';
+    progressBar.style.borderRadius = '2px';
+    progressBar.style.overflow = 'hidden';
+    
+    const progress = document.createElement('div');
+    progress.style.width = '0%';
+    progress.style.backgroundColor = '#4a8ab8';
+    progress.style.height = '100%';
+    progressBar.appendChild(progress);
+    
+    playButton.appendChild(progressBar);
+    
+    // 進捗更新
+    const updateInterval = setInterval(() => {
+      if (audio.duration) {
+        const percent = (audio.currentTime / audio.duration) * 100;
+        progress.style.width = `${percent}%`;
+      }
+    }, 100);
+    
+    audio.oncanplaythrough = () => {
+      audio.play().then(() => {
+        safeLog('ボタンからの再生開始', null);
+      }).catch(err => {
+        safeLog('ボタンからの再生エラー', err);
+        playButton.textContent = '❌ 再生失敗';
+        playButton.disabled = false;
+        clearInterval(updateInterval);
+      });
+    };
+    
+    audio.onended = () => {
+      playButton.remove();
+      clearInterval(updateInterval);
+    };
+    
+    audio.onerror = () => {
       playButton.textContent = '❌ 再生失敗';
-    });
+      playButton.disabled = false;
+      clearInterval(updateInterval);
+    };
     
     // クリックイベントをユーザーインタラクションとして保存
-    storeUserInteraction();
+    storeUserInteraction(true);
   };
   
   // ボタンを追加
@@ -680,7 +957,7 @@ function createQuickLinks() {
       recogEl.textContent = `お問合せ内容: ${t}`;
       handleAI(t);
       // クリックイベントをユーザーインタラクションとして保存
-      storeUserInteraction();
+      storeUserInteraction(true);
     };
     quickLinksEl.appendChild(b);
   });
