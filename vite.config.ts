@@ -5,6 +5,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export default defineConfig({
+  // エントリポイントを明示的に指定
+  build: {
+    rollupOptions: {
+      input: resolve(__dirname, 'public/index.html'), // 実際のindex.htmlの場所に合わせて修正
+    },
+  },
+
   // 既存の設定を保持
   resolve: {
     alias: {
