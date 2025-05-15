@@ -1,5 +1,7 @@
 // netlify/functions/stt/index.js
 import FormData from 'form-data';
+// 必要に応じてBufferを明示的にインポート
+import { Buffer } from 'buffer';
 
 /* ───────── STT用プロンプト情報 ───────── */
 const STT_PROMPT = {
@@ -184,16 +186,8 @@ async function callWhisperAPIWithRetry(audioBuffer, format, maxRetries = 3) {
       // プロンプトを追加 - 修正: KINDERGARTEN_PROMPTを使用
       formData.append('prompt', KINDERGARTEN_PROMPT);
 
-      // formDataからバイナリデータを取得
-      const formDataBuffer = await new Promise((resolve) => {
-        let chunks = [];
-        formData.on('data', (chunk) => {
-          chunks.push(chunk);
-        });
-        formData.on('end', () => {
-          resolve(Buffer.concat(chunks));
-        });
-      });
+      // 修正: formDataからバイナリデータを取得する方法を変更
+      const formDataBuffer = Buffer.from(formData.getBuffer());
 
       // formDataのヘッダーを取得
       const formHeaders = formData.getHeaders();
