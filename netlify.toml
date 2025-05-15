@@ -8,6 +8,9 @@ targetPort = 5173
 port = 8888
 publish = "public"
 
+[functions]
+timeout = 26
+
 [[redirects]]
 from = "/*"
 to = "/index.html"
