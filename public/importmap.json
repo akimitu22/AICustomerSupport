@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "fusion-core": "/js/FusionCore.hot.js"
+  }
+}

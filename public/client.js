@@ -7,18 +7,18 @@ const safeLog = (label, data) => {
   try {
     // コンソールが利用可能か確認
     if (typeof console === 'undefined' || !console.log) return;
-    
+
     // undefined/nullの安全な表示
     if (data === undefined) {
       console.log(`${label}: undefined`);
       return;
     }
-    
+
     if (data === null) {
       console.log(`${label}: null`);
       return;
     }
-    
+
     // 大きなデータは省略処理
     if (typeof data === 'string' && data.length > 500) {
       console.log(`${label}:`, data.substring(0, 500) + `... [省略:${data.length - 500}文字]`);
@@ -38,45 +38,69 @@ const safeLog = (label, data) => {
 };
 
 const statusEl = document.getElementById('status');
-const recogEl  = document.getElementById('recognized');
-const replyEl  = document.getElementById('reply');
+const recogEl = document.getElementById('recognized');
+const replyEl = document.getElementById('reply');
 const quickLinksEl = document.getElementById('quick-links');
 
 let audioCtx, processor, micStream, mediaRecorder;
-let vadActive = false, speaking = false, silenceTimer;
+let vadActive = false,
+  speaking = false,
+  silenceTimer;
 let recordingChunks = [];
 let isPlayingAudio = false;
 let recordingStartTime = 0;
 let currentSessionId = localStorage.getItem('kindergarten_session_id') || '';
 let conversationStage = 'initial';
-window.currentAudio = null;                         // グローバル変数
+window.currentAudio = null; // グローバル変数
 
 /* ───────── VAD 初期化 ───────── */
-startVAD().catch(err=>{
+startVAD().catch(err => {
   console.error(err);
-  statusEl.textContent='❌ マイク使用不可';
+  statusEl.textContent = '❌ マイク使用不可';
 });
 
-async function startVAD(){
-  statusEl.textContent='🎤 マイク準備中…';
+async function startVAD() {
+  statusEl.textContent = '🎤 マイク準備中…';
   try {
     micStream = await navigator.mediaDevices.getUserMedia({
-      audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
     });
-    
-    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-    const src = audioCtx.createMediaStreamSource(micStream);
-    const gain = audioCtx.createGain(); gain.gain.value=1.5;
-    processor = audioCtx.createScriptProcessor(2048,1,1);
-    processor.onaudioprocess = vadMonitor;
-    src.connect(gain); gain.connect(processor); processor.connect(audioCtx.destination);
 
-    mediaRecorder = new MediaRecorder(micStream,{mimeType:'audio/webm;codecs=opus'});
-    mediaRecorder.ondataavailable = e=>recordingChunks.push(e.data);
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(micStream);
+    const gain = audioCtx.createGain();
+    gain.gain.value = 1.5;
+    processor = audioCtx.createScriptProcessor(2048, 1, 1);
+    processor.onaudioprocess = vadMonitor;
+    src.connect(gain);
+    gain.connect(processor);
+    processor.connect(audioCtx.destination);
+
+    // iOS Safariはwebmをサポートしない → fallback & 警告
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/mp4';
+    mediaRecorder = new MediaRecorder(micStream, { mimeType });
+
+    // iOS警告（条件を満たした場合のみ表示）
+    if (
+      !MediaRecorder.isTypeSupported('audio/webm;codecs=opus') &&
+      /iP(hone|ad|od)/.test(navigator.userAgent)
+    ) {
+      alert(
+        '⚠️ お使いのブラウザ（iOS Safariなど）は録音に対応していません。Chrome または Android を推奨します。'
+      );
+    }
+
+    mediaRecorder.ondataavailable = e => recordingChunks.push(e.data);
     mediaRecorder.onstop = handleRecordingStop;
 
-    statusEl.textContent='🎧 どうぞお話しください…';
-    vadActive=true;
+    statusEl.textContent = '🎧 どうぞお話しください…';
+    vadActive = true;
     createQuickLinks();
   } catch (err) {
     console.error('マイク初期化エラー:', err);
@@ -85,31 +109,36 @@ async function startVAD(){
 }
 
 /* ───────── 発話検知 ───────── */
-function vadMonitor(e){
-  if(!vadActive||isPlayingAudio) return;
-  const buf=e.inputBuffer.getChannelData(0);
-  const vol=Math.sqrt(buf.reduce((s,x)=>s+x*x,0)/buf.length);
-  if(vol>0.015){
-    if(!speaking){
-      speaking=true; statusEl.textContent='📢 発話中…';
-      recordingChunks=[]; recordingStartTime=Date.now(); mediaRecorder.start();
+function vadMonitor(e) {
+  if (!vadActive || isPlayingAudio) return;
+  const buf = e.inputBuffer.getChannelData(0);
+  const vol = Math.sqrt(buf.reduce((s, x) => s + x * x, 0) / buf.length);
+  if (vol > 0.015) {
+    if (!speaking) {
+      speaking = true;
+      statusEl.textContent = '📢 発話中…';
+      recordingChunks = [];
+      recordingStartTime = Date.now();
+      mediaRecorder.start();
     }
     clearTimeout(silenceTimer);
-    silenceTimer=setTimeout(stopRecording,1500); // 1.5秒に延長
+    silenceTimer = setTimeout(stopRecording, 1500); // 1.5秒に延長
   }
 }
 
-function stopRecording(){
-  if(mediaRecorder.state==='recording') mediaRecorder.stop();
-  speaking=false; vadActive=false; statusEl.textContent='🧠 回答中…';
+function stopRecording() {
+  if (mediaRecorder.state === 'recording') mediaRecorder.stop();
+  speaking = false;
+  vadActive = false;
+  statusEl.textContent = '🧠 回答中…';
 }
 
 /* ───────── 修正: Whisper → GPT → TTS ───────── */
 async function handleRecordingStop() {
-  const blob = new Blob(recordingChunks, {type: 'audio/webm'});
-  
-  safeLog("録音Blobサイズ", blob.size);
-  
+  const blob = new Blob(recordingChunks, { type: mediaRecorder.mimeType });
+
+  safeLog('録音Blobサイズ', blob.size);
+
   // 録音時間をチェック - 短すぎる場合は処理しない
   const duration = (Date.now() - recordingStartTime) / 1000;
   if (duration < 1.5) {
@@ -117,111 +146,117 @@ async function handleRecordingStop() {
     vadActive = true;
     return;
   }
-  
+
   try {
     statusEl.textContent = '🧠 発話認識中…';
-    
+
     // Base64エンコード処理
     const arrayBuffer = await blob.arrayBuffer();
     const base64Data = btoa(
-      new Uint8Array(arrayBuffer).reduce(
-        (data, byte) => data + String.fromCharCode(byte), ''
-      )
+      new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
     );
-    
-    safeLog("音声データサイズ", Math.round(base64Data.length / 1024) + "KB");
-    safeLog("録音時間", duration + "秒");
-    
+
+    safeLog('音声データサイズ', Math.round(base64Data.length / 1024) + 'KB');
+    safeLog('録音時間', duration + '秒');
+
     // STTリクエスト送信
-    safeLog("STTリクエスト送信開始", {
+    safeLog('STTリクエスト送信開始', {
       endpoint: '/.netlify/functions/stt',
-      format: 'audio/webm',
-      duration: duration
+      format: mediaRecorder.mimeType,
+      duration: duration,
     });
-    
+
     // STTリクエスト送信 (エラーハンドリング強化)
     let response;
     try {
       response = await fetch('/.netlify/functions/stt', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           audio: base64Data,
-          format: 'audio/webm',
-          duration: duration
-        })
+          format: mediaRecorder.mimeType,
+          duration: duration,
+        }),
       });
-      
-      safeLog("STTレスポンス受信", {
+
+      safeLog('STTレスポンス受信', {
         status: response.status,
-        statusText: response.statusText
+        statusText: response.statusText,
       });
-      
+
       if (!response.ok) {
         if (response.status === 422) {
-          throw new Error("音声を認識できませんでした。もう少しはっきり話してください。");
+          throw new Error('音声を認識できませんでした。もう少しはっきり話してください。');
         } else {
           throw new Error(`STTサーバーエラー: ${response.status} ${response.statusText}`);
         }
       }
-      
+
       // レスポンスのJSONパース (エラーハンドリング強化)
       let sttResult;
       try {
         sttResult = await response.json();
-        safeLog("STT結果(生データ)", sttResult);
+        safeLog('STT結果(生データ)', sttResult);
       } catch (jsonError) {
-        safeLog("JSONパースエラー", jsonError);
+        safeLog('JSONパースエラー', jsonError);
         throw new Error(`STTレスポンスのJSONパースに失敗: ${jsonError.message}`);
       }
-      
+
       // データ構造の堅牢な検証
       if (!sttResult) {
-        throw new Error("STTレスポンスが空です");
+        throw new Error('STTレスポンスが空です');
       }
-      
+
       // エラーチェック
       if (sttResult.error) {
-        safeLog("STTエラーレスポンス", sttResult.error);
+        safeLog('STTエラーレスポンス', sttResult.error);
         throw new Error(`音声認識エラー: ${sttResult.error}`);
       }
-      
+
       // text プロパティの検証 (堅牢性向上)
       let recognizedText;
-      
+
       // ケース1: 新しい構造 - { text: "...", originalText: "...", success: true }
       if (sttResult.text && typeof sttResult.text === 'string' && sttResult.text.trim()) {
         recognizedText = sttResult.text;
-        safeLog("認識テキスト(直接プロパティ)", recognizedText);
+        safeLog('認識テキスト(直接プロパティ)', recognizedText);
       }
       // ケース2: 古い構造 - { stt: { text: "..." }, ... }
-      else if (sttResult.stt && sttResult.stt.text && typeof sttResult.stt.text === 'string' && sttResult.stt.text.trim()) {
+      else if (
+        sttResult.stt &&
+        sttResult.stt.text &&
+        typeof sttResult.stt.text === 'string' &&
+        sttResult.stt.text.trim()
+      ) {
         recognizedText = sttResult.stt.text;
-        safeLog("認識テキスト(sttプロパティ経由)", recognizedText);
+        safeLog('認識テキスト(sttプロパティ経由)', recognizedText);
       }
       // ケース3: その他の構造 または 空テキスト - エラー
       else {
-        safeLog("無効なSTTレスポンス構造", {
+        safeLog('無効なSTTレスポンス構造', {
           hasText: !!sttResult.text,
           textType: typeof sttResult.text,
           textEmpty: sttResult.text === '',
           hasStt: !!sttResult.stt,
           sttType: typeof sttResult.stt,
-          allKeys: Object.keys(sttResult)
+          allKeys: Object.keys(sttResult),
         });
-        throw new Error("STTレスポンスに有効なテキストが含まれていません");
+        throw new Error('STTレスポンスに有効なテキストが含まれていません');
       }
-      
+
       // テキスト処理と表示
-      let fixedText = recognizedText.replace(/ご視聴ありがとうございました/g, 'ご回答ありがとうございました');
+      let fixedText = recognizedText.replace(
+        /ご視聴ありがとうございました/g,
+        'ご回答ありがとうございました'
+      );
       recogEl.textContent = `お問合せ内容: ${fixedText}`;
-      
+
       // AIへの処理を開始
       await handleAI(recognizedText);
     } catch (e) {
-      safeLog("STT処理エラー", e);
+      safeLog('STT処理エラー', e);
       statusEl.textContent = '❌ 発話認識失敗: ' + (e.message || '不明なエラー');
       vadActive = true;
     }
@@ -232,47 +267,49 @@ async function handleRecordingStop() {
   }
 }
 
-async function handleAI(msg){
-  try{
-    statusEl.textContent='💭 回答生成中…';
-    
+async function handleAI(msg) {
+  try {
+    statusEl.textContent = '💭 回答生成中…';
+
     // 中間メッセージを表示
-    showInterimMessage("しばらくお待ちください。");
-    
-    safeLog("AIリクエスト送信開始", { message: msg.substring(0, 50) + (msg.length > 50 ? "..." : "") });
-    
+    showInterimMessage('しばらくお待ちください。');
+
+    safeLog('AIリクエスト送信開始', {
+      message: msg.substring(0, 50) + (msg.length > 50 ? '...' : ''),
+    });
+
     // AIリクエスト (エラーハンドリング強化)
     let aiResponse;
     try {
       const response = await fetch('/.netlify/functions/ai', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({message: msg, sessionId: currentSessionId})
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg, sessionId: currentSessionId }),
       });
-      
-      safeLog("AIレスポンス受信", { status: response.status });
-      
+
+      safeLog('AIレスポンス受信', { status: response.status });
+
       if (!response.ok) {
         throw new Error(`AIサーバーエラー: ${response.status}`);
       }
-      
+
       aiResponse = await response.json();
     } catch (aiError) {
-      safeLog("AI通信エラー", aiError);
+      safeLog('AI通信エラー', aiError);
       throw new Error(`AI処理中にエラーが発生: ${aiError.message}`);
     }
-    
-    safeLog("AI結果", {
+
+    safeLog('AI結果', {
       hasReply: !!aiResponse.reply,
       sessionId: aiResponse.sessionId,
-      stage: aiResponse.stage
+      stage: aiResponse.stage,
     });
-    
+
     // レスポンス検証
     if (!aiResponse || !aiResponse.reply) {
-      throw new Error("AIからの応答が無効です");
+      throw new Error('AIからの応答が無効です');
     }
-    
+
     // セッション情報の更新
     currentSessionId = aiResponse.sessionId || currentSessionId;
     localStorage.setItem('kindergarten_session_id', currentSessionId);
@@ -280,7 +317,7 @@ async function handleAI(msg){
 
     // 中間メッセージを非表示
     hideInterimMessage();
-    
+
     // 回答テキストを表示
     setTimeout(() => {
       replyEl.textContent = `サポートからの回答: ${aiResponse.reply}`;
@@ -288,60 +325,59 @@ async function handleAI(msg){
 
     // TTS処理開始
     statusEl.textContent = '🔊 回答生成中…';
-    
-    safeLog("TTSリクエスト送信開始", {
+
+    safeLog('TTSリクエスト送信開始', {
       textLength: aiResponse.reply.length,
-      textPreview: aiResponse.reply.substring(0, 50) + (aiResponse.reply.length > 50 ? "..." : "")
+      textPreview: aiResponse.reply.substring(0, 50) + (aiResponse.reply.length > 50 ? '...' : ''),
     });
-    
+
     // TTSリクエスト (エラーハンドリング強化)
     let ttsResponse;
     try {
       const response = await fetch('/.netlify/functions/tts', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({text: aiResponse.reply})
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: aiResponse.reply }),
       });
-      
-      safeLog("TTSレスポンス受信", { status: response.status });
-      
+
+      safeLog('TTSレスポンス受信', { status: response.status });
+
       if (!response.ok) {
         throw new Error(`TTSサーバーエラー: ${response.status}`);
       }
-      
+
       ttsResponse = await response.json();
     } catch (ttsError) {
-      safeLog("TTS通信エラー", ttsError);
+      safeLog('TTS通信エラー', ttsError);
       throw new Error(`TTS処理中にエラーが発生: ${ttsError.message}`);
     }
-    
-    safeLog("TTS結果", {
+
+    safeLog('TTS結果', {
       hasAudioUrl: !!ttsResponse.audioUrl,
-      hasError: !!ttsResponse.error
+      hasError: !!ttsResponse.error,
     });
-    
+
     // 音声URL検証と再生
     if (ttsResponse.audioUrl) {
-      safeLog("音声URL取得成功", { urlPreview: ttsResponse.audioUrl.substring(0, 50) + "..." });
-      
+      safeLog('音声URL取得成功', { urlPreview: ttsResponse.audioUrl.substring(0, 50) + '...' });
+
       try {
         await playAudio(ttsResponse.audioUrl);
-        safeLog("音声再生完了", "再生完了");
+        safeLog('音声再生完了', '再生完了');
       } catch (playError) {
-        safeLog("音声再生エラー", playError);
+        safeLog('音声再生エラー', playError);
         // 再生エラーは致命的ではないため、処理を続行
       }
     } else if (ttsResponse.error) {
-      safeLog("TTS エラー", {
+      safeLog('TTS エラー', {
         error: ttsResponse.error,
-        detail: ttsResponse.errorDetail || ""
+        detail: ttsResponse.errorDetail || '',
       });
       // エラーがあってもテキスト応答は表示済みなので続行
     } else {
-      safeLog("音声URLが見つかりません", ttsResponse);
+      safeLog('音声URLが見つかりません', ttsResponse);
       // 音声なしでも続行
     }
-    
   } catch (e) {
     safeLog('AI/TTS処理エラー', e);
     statusEl.textContent = '❌ 回答生成失敗: ' + (e.message || '不明なエラー');
@@ -377,12 +413,14 @@ function hideInterimMessage() {
 function playAudio(url) {
   return new Promise((resolve, reject) => {
     try {
-      safeLog("音声再生開始処理", { url: url.slice(0, 60) + "…" });
+      safeLog('音声再生開始処理', { url: url.slice(0, 60) + '…' });
 
       /* 既存音声を完全停止 */
       if (isPlayingAudio && window.currentAudio) {
-        try { window.currentAudio.pause(); } catch {}
-        window.currentAudio.src = "";
+        try {
+          window.currentAudio.pause();
+        } catch {}
+        window.currentAudio.src = '';
         window.currentAudio = null;
         isPlayingAudio = false;
       }
@@ -391,11 +429,11 @@ function playAudio(url) {
       window.currentAudio = new Audio();
       let lastPos = 0;
       let idleCount = 0;
-      const MAX_IDLE = 6;                 // ← ★ idle 緩和 6-8 回
-      const IDLE_TH = 0.1;                // ← ★ Δ < 0.1 s で idle 加算
-      const RESET_TH = 0.5;               // ← ★ Δ ≥ 0.5 s で idle リセット
+      const MAX_IDLE = 6; // ← ★ idle 緩和 6-8 回
+      const IDLE_TH = 0.1; // ← ★ Δ < 0.1 s で idle 加算
+      const RESET_TH = 0.5; // ← ★ Δ ≥ 0.5 s で idle リセット
       let progressTimer = null;
-      let backupTimer   = null;
+      let backupTimer = null;
 
       /* 進捗監視 */
       const startWatch = () => {
@@ -408,11 +446,11 @@ function playAudio(url) {
           if (delta < IDLE_TH) {
             idleCount++;
             if (idleCount >= MAX_IDLE) {
-              safeLog("無音停止検出", { cur, idleCount });
-              cleanup();            // 停止処理
+              safeLog('無音停止検出', { cur, idleCount });
+              cleanup(); // 停止処理
             }
           } else if (delta >= RESET_TH) {
-            idleCount = 0;          // 大きく進んだらカウンタ初期化
+            idleCount = 0; // 大きく進んだらカウンタ初期化
           }
           lastPos = cur;
         }, 1000);
@@ -420,7 +458,9 @@ function playAudio(url) {
 
       /* 停止共通処理 */
       const cleanup = () => {
-        try { window.currentAudio.pause(); } catch {}
+        try {
+          window.currentAudio.pause();
+        } catch {}
         clearInterval(progressTimer);
         clearTimeout(backupTimer);
         isPlayingAudio = false;
@@ -428,46 +468,50 @@ function playAudio(url) {
       };
 
       /* エラー処理 */
-      window.currentAudio.onerror = (e) => {
+      window.currentAudio.onerror = e => {
         clearInterval(progressTimer);
         clearTimeout(backupTimer);
         isPlayingAudio = false;
-        reject(new Error("音声読み込み失敗"));
+        reject(new Error('音声読み込み失敗'));
       };
 
       /* 再生準備完了 → 動的タイマー確定 */
       window.currentAudio.oncanplaythrough = () => {
-        safeLog("音声 oncanplaythrough", { duration: window.currentAudio.duration });
+        safeLog('音声 oncanplaythrough', { duration: window.currentAudio.duration });
 
         /* 動的バックアップ: (音声長 +10 s) ただし最大90 s */
-        const dur = isFinite(window.currentAudio.duration) && window.currentAudio.duration > 0
-          ? Math.min(90, window.currentAudio.duration + 10)
-          : 90;
+        const dur =
+          isFinite(window.currentAudio.duration) && window.currentAudio.duration > 0
+            ? Math.min(90, window.currentAudio.duration + 10)
+            : 90;
 
         backupTimer = setTimeout(() => {
-          safeLog("バックアップタイマー発火", { dur });
+          safeLog('バックアップタイマー発火', { dur });
           cleanup();
         }, dur * 1000);
 
         /* 再生開始 */
         isPlayingAudio = true;
-        window.currentAudio.play()
-          .then(() => safeLog("音声再生開始"))
-          .catch(err => { clearTimeout(backupTimer); reject(err); });
+        window.currentAudio
+          .play()
+          .then(() => safeLog('音声再生開始'))
+          .catch(err => {
+            clearTimeout(backupTimer);
+            reject(err);
+          });
 
-        startWatch();   // 進捗監視開始
+        startWatch(); // 進捗監視開始
       };
 
       /* 再生正常終了 */
       window.currentAudio.onended = () => {
-        safeLog("音声再生 onended");
+        safeLog('音声再生 onended');
         cleanup();
       };
 
       /* URL 設定してロード */
       window.currentAudio.src = url;
       window.currentAudio.load();
-
     } catch (err) {
       isPlayingAudio = false;
       reject(err);
@@ -482,13 +526,17 @@ function createQuickLinks() {
     '入園の申し込みについて教えてください',
     '給食について教えてください',
     '保育時間について教えてください',
-    '見学できますか？'
+    '見学できますか？',
   ];
   quickLinksEl.innerHTML = '';
   arr.forEach(t => {
     const b = document.createElement('button');
-    b.textContent = t; b.className = 'ql';
-    b.onclick = () => { recogEl.textContent = `お問合せ内容: ${t}`; handleAI(t); };
+    b.textContent = t;
+    b.className = 'ql';
+    b.onclick = () => {
+      recogEl.textContent = `お問合せ内容: ${t}`;
+      handleAI(t);
+    };
     quickLinksEl.appendChild(b);
   });
 }
